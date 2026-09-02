@@ -1,0 +1,134 @@
+blueprint:
+  name: Rocket Launch - Countdown Alert
+  description: >
+    Sends one notification before a matching launch: normally 1 hour ahead,
+    but never later than a fallback clock time (default 8:30 PM) — so a
+    launch overnight still warns you before bed instead of waking you with a
+    1-hour-out alert at 1 AM. Checks every minute, so it can take up to a
+    minute to fire after the threshold is crossed.
+
+    Requires a one-time helper: create an Input Text helper (Settings >
+    Devices & Services > Helpers > + Create Helper > Text) to remember which
+    launch was last alerted, so the minute-by-minute check does not repeat
+    the same notification. Any name works.
+  domain: automation
+  source_url: https://github.com/Tmatz27/ha-rocket-launch-card-/blob/main/blueprints/automation/rocket_launch_countdown_alert.yaml
+  input:
+    launch_sensors:
+      name: Launch sensors
+      description: >
+        The harocketlaunchlive sensors to watch. Defaults to the five entities
+        the integration always creates.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            integration: rocketlaunchlive
+      default:
+        - sensor.rocket_launch_1
+        - sensor.rocket_launch_2
+        - sensor.rocket_launch_3
+        - sensor.rocket_launch_4
+        - sensor.rocket_launch_5
+    site_filter:
+      name: Launch site filter
+      description: >
+        Case-insensitive text matched against each launch's pad, state, and
+        country (for example "Vandenberg", "Cape Canaveral", or "CA"). Leave
+        blank to be notified about any tracked launch.
+      default: Vandenberg
+      selector:
+        text: {}
+    minutes_before:
+      name: Minutes before launch
+      description: Normal heads-up lead time, if it lands before the fallback time.
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 240
+          unit_of_measurement: minutes
+    fallback_time:
+      name: Latest alert time
+      description: >
+        Never alert later than this clock time, even if that is less than the
+        usual lead time before launch (this is what covers an overnight
+        launch).
+      default: "20:30:00"
+      selector:
+        time: {}
+    dedup_helper:
+      name: Dedup helper (input_text)
+      description: >
+        An Input Text helper used to remember the last launch alerted, so this
+        does not repeat every minute. Create one under Settings > Devices &
+        Services > Helpers if you don't already have one.
+      selector:
+        entity:
+          filter:
+            domain: input_text
+    notify_service:
+      name: Notify action
+      description: >
+        The notify action to call, e.g. notify.mobile_app_your_phone or
+        notify.notify. Find exact names under Developer Tools > Actions by
+        searching "notify".
+      selector:
+        text: {}
+
+trigger:
+  - trigger: time_pattern
+    minutes: "/1"
+
+variables:
+  entities: !input launch_sensors
+  site_filter: !input site_filter
+  minutes_before: !input minutes_before
+  fallback_time: !input fallback_time
+  dedup_helper: !input dedup_helper
+  already_alerted: "{{ states(dedup_helper) }}"
+  computed: |-
+    {% set site = site_filter | lower %}
+    {% set fallback_dt = today_at(fallback_time) %}
+    {% set ns = namespace(fire=false, key='', name='', provider='', minutes_left=0) %}
+    {% for eid in entities %}
+      {% set pad = state_attr(eid, 'launch_pad') %}
+      {% if pad and (site == '' or site in (pad | lower) or site in (state_attr(eid, 'launch_US_state') | default('', true) | lower) or site in (state_attr(eid, 'launch_location') | default('', true) | lower)) %}
+        {% set ts = state_attr(eid, 'launch_target_timestamp') %}
+        {% if ts not in [none, ''] %}
+          {% set launch_dt = as_local(as_datetime(ts | int)) %}
+          {% if launch_dt > now() %}
+            {% set candidate_dt = launch_dt - timedelta(minutes=minutes_before | int) %}
+            {% set alert_dt = [candidate_dt, fallback_dt] | min %}
+            {% set key = eid ~ '|' ~ (ts | string) %}
+            {% if now() >= alert_dt and key != already_alerted and not ns.fire %}
+              {% set ns.fire = true %}
+              {% set ns.key = key %}
+              {% set ns.name = state_attr(eid, 'name') | default('Unknown launch', true) %}
+              {% set ns.provider = state_attr(eid, 'provider') | default('', true) %}
+              {% set ns.minutes_left = ((launch_dt - now()).total_seconds() / 60) | round(0, 'floor') | int %}
+            {% endif %}
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {{ dict(fire=ns.fire, key=ns.key, name=ns.name, provider=ns.provider, minutes_left=ns.minutes_left) }}
+
+condition:
+  - condition: template
+    value_template: "{{ computed.fire }}"
+
+action:
+  - action: !input notify_service
+    data:
+      title: "🚀 Launch countdown"
+      message: >-
+        {{ computed.name }} ({{ computed.provider }}) — about
+        {{ computed.minutes_left }} min to go.
+  - action: input_text.set_value
+    target:
+      entity_id: !input dedup_helper
+    data:
+      value: "{{ computed.key }}"
+
+mode: single

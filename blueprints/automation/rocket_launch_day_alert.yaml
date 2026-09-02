@@ -1,0 +1,95 @@
+blueprint:
+  name: Rocket Launch - Launch Day Alert
+  description: >
+    Checks once a day whether a launch from your chosen site is scheduled for
+    today, and if so sends one notification naming the mission and its
+    scheduled time. Reads the harocketlaunchlive integration's five
+    "next launch" sensors, so a matching launch has to be inside the next 5
+    tracked worldwide to be seen at all.
+  domain: automation
+  source_url: https://github.com/Tmatz27/ha-rocket-launch-card-/blob/main/blueprints/automation/rocket_launch_day_alert.yaml
+  input:
+    launch_sensors:
+      name: Launch sensors
+      description: >
+        The harocketlaunchlive sensors to watch. Defaults to the five entities
+        the integration always creates.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            integration: rocketlaunchlive
+      default:
+        - sensor.rocket_launch_1
+        - sensor.rocket_launch_2
+        - sensor.rocket_launch_3
+        - sensor.rocket_launch_4
+        - sensor.rocket_launch_5
+    site_filter:
+      name: Launch site filter
+      description: >
+        Case-insensitive text matched against each launch's pad, state, and
+        country (for example "Vandenberg", "Cape Canaveral", or "CA"). Leave
+        blank to be notified about any tracked launch.
+      default: Vandenberg
+      selector:
+        text: {}
+    check_time:
+      name: Daily check time
+      description: What time to run the once-a-day check.
+      default: "08:00:00"
+      selector:
+        time: {}
+    notify_service:
+      name: Notify action
+      description: >
+        The notify action to call, e.g. notify.mobile_app_your_phone or
+        notify.notify. Find exact names under Developer Tools > Actions by
+        searching "notify".
+      selector:
+        text: {}
+
+trigger:
+  - trigger: time
+    at: !input check_time
+
+variables:
+  entities: !input launch_sensors
+  site_filter: !input site_filter
+  computed: |-
+    {% set site = site_filter | lower %}
+    {% set ns = namespace(found=false, name='', provider='', pad='', time_str='') %}
+    {% for eid in entities %}
+      {% set pad = state_attr(eid, 'launch_pad') %}
+      {% if pad and (site == '' or site in (pad | lower) or site in (state_attr(eid, 'launch_US_state') | default('', true) | lower) or site in (state_attr(eid, 'launch_location') | default('', true) | lower)) %}
+        {% set ts = state_attr(eid, 'launch_target_timestamp') %}
+        {% set est = state_attr(eid, 'est_launch_date') %}
+        {% set is_today = false %}
+        {% if ts not in [none, ''] %}
+          {% set is_today = as_local(as_datetime(ts | int)).date() == now().date() %}
+        {% elif est not in [none, 'NA'] %}
+          {% set is_today = as_local(as_datetime(est)).date() == now().date() %}
+        {% endif %}
+        {% if is_today and not ns.found %}
+          {% set ns.found = true %}
+          {% set ns.name = state_attr(eid, 'name') | default('Unknown launch', true) %}
+          {% set ns.provider = state_attr(eid, 'provider') | default('', true) %}
+          {% set ns.pad = pad %}
+          {% set ns.time_str = (as_timestamp(ts | int) | timestamp_custom('%-I:%M %p')) if ts not in [none, ''] else 'time still TBD' %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {{ dict(found=ns.found, name=ns.name, provider=ns.provider, pad=ns.pad, time_str=ns.time_str) }}
+
+condition:
+  - condition: template
+    value_template: "{{ computed.found }}"
+
+action:
+  - action: !input notify_service
+    data:
+      title: "🚀 Launch today"
+      message: >-
+        {{ computed.name }} ({{ computed.provider }}) — {{ computed.pad }} — {{ computed.time_str }}
+
+mode: single
