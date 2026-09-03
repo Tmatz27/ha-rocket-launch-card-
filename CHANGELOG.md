@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+- Restyled both cards to match a flat dark theme instead of the earlier
+  glassy gradient look: flat card surfaces (no glow), a colored left accent
+  capsule and a large soft rocket-icon watermark per launch panel (matching
+  a common "colored accent bar on a flat dark card" convention), and flat
+  solid-color countdown digits instead of gradient-clipped text
+- Retuned the accent/warn/hot/good palette to be less neon/saturated
+- Swapped the decorative moon emoji for a proper `mdi:moon-waning-crescent`
+  icon and toned down the star field, consistent with an all-mdi-icon theme
+
 ## 0.2.0
 
 - **Breaking:** switched data sources from djtimca/harocketlaunchlive to

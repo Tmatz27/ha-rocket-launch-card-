@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.2.0
+ * Version 0.2.1
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,7 +24,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.2.0";
+const ROCKET_LAUNCH_CARD_VERSION = "0.2.1";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
@@ -525,18 +525,17 @@ function noEntityHtml(kind) {
 }
 
 function starfieldHtml() {
-  // Purely decorative, themable via --rl-star-opacity; kept cheap (a handful
-  // of fixed-position dots, no per-frame JS) so it never competes with the
-  // live countdown for render budget.
+  // Purely decorative, kept cheap (a handful of fixed-position dots, no
+  // per-frame JS) and deliberately restrained - flat mdi icon, small dim
+  // dots - to sit quietly behind a flat dark theme instead of announcing
+  // itself the way a glowing gradient scene would.
   return `
     <div class="rl-stars" aria-hidden="true">
-      <span class="rl-star" style="top:8%;left:12%;--d:0s"></span>
-      <span class="rl-star" style="top:18%;left:78%;--d:.6s"></span>
-      <span class="rl-star" style="top:35%;left:92%;--d:1.4s"></span>
-      <span class="rl-star" style="top:12%;left:45%;--d:2.1s"></span>
-      <span class="rl-star" style="top:70%;left:88%;--d:.9s"></span>
-      <span class="rl-star" style="top:82%;left:8%;--d:1.8s"></span>
-      <span class="rl-moon" title="">🌙</span>
+      <span class="rl-star" style="top:10%;left:14%;--d:0s"></span>
+      <span class="rl-star" style="top:20%;left:80%;--d:.8s"></span>
+      <span class="rl-star" style="top:38%;left:92%;--d:1.6s"></span>
+      <span class="rl-star" style="top:14%;left:48%;--d:2.3s"></span>
+      <ha-icon class="rl-moon" icon="mdi:moon-waning-crescent"></ha-icon>
     </div>
   `;
 }
@@ -544,16 +543,15 @@ function starfieldHtml() {
 function baseStyles() {
   return `
     :host {
-      --rl-surface: var(--ha-card-background, var(--card-background-color, #14162a));
-      --rl-surface-2: var(--secondary-background-color, rgba(255, 255, 255, .05));
-      --rl-text: var(--primary-text-color, #f4f5fb);
-      --rl-muted: var(--secondary-text-color, rgba(228, 230, 255, .64));
-      --rl-border: var(--divider-color, rgba(255, 255, 255, .14));
-      --rl-accent: #6c8cff;
-      --rl-accent-2: #7fe0ff;
-      --rl-warn: #ffb648;
-      --rl-hot: #ff5f6d;
-      --rl-good: #57e6a1;
+      --rl-surface: var(--ha-card-background, var(--card-background-color, #141416));
+      --rl-surface-2: var(--secondary-background-color, rgba(255, 255, 255, .035));
+      --rl-text: var(--primary-text-color, #f2f2f3);
+      --rl-muted: var(--secondary-text-color, rgba(235, 235, 240, .56));
+      --rl-border: var(--divider-color, rgba(255, 255, 255, .09));
+      --rl-accent: #4f8ef0;
+      --rl-warn: #e2a13c;
+      --rl-hot: #e0574c;
+      --rl-good: #5aab55;
       display: block;
       color: var(--rl-text);
       font-family: var(--paper-font-body1_-_font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
@@ -563,12 +561,9 @@ function baseStyles() {
       position: relative;
       overflow: hidden;
       border: 1px solid var(--rl-border);
-      border-radius: var(--ha-card-border-radius, 26px);
-      background:
-        radial-gradient(circle at 10% -10%, rgba(108, 140, 255, .14), transparent 45%),
-        radial-gradient(circle at 100% 115%, rgba(127, 224, 255, .10), transparent 45%),
-        var(--rl-surface);
-      box-shadow: var(--ha-card-box-shadow, 0 10px 30px rgba(0, 0, 0, .22));
+      border-radius: var(--ha-card-border-radius, 18px);
+      background: var(--rl-surface);
+      box-shadow: var(--ha-card-box-shadow, 0 6px 18px rgba(0, 0, 0, .3));
     }
     .rl-stars {
       position: absolute;
@@ -579,27 +574,73 @@ function baseStyles() {
     }
     .rl-star {
       position: absolute;
-      width: 3px;
-      height: 3px;
+      width: 2.5px;
+      height: 2.5px;
       border-radius: 50%;
-      background: #fff;
-      opacity: .45;
-      animation: rl-twinkle 3.2s ease-in-out infinite;
+      background: var(--rl-muted);
+      opacity: .35;
+      animation: rl-twinkle 4s ease-in-out infinite;
       animation-delay: var(--d, 0s);
     }
     .rl-moon {
       position: absolute;
-      top: 6%;
-      right: 6%;
-      font-size: 16px;
-      opacity: .55;
-      filter: drop-shadow(0 0 6px rgba(127, 224, 255, .35));
+      top: 8%;
+      right: 7%;
+      --mdc-icon-size: 15px;
+      color: var(--rl-muted);
+      opacity: .5;
     }
     @keyframes rl-twinkle {
-      0%, 100% { opacity: .15; }
-      50% { opacity: .8; }
+      0%, 100% { opacity: .12; }
+      50% { opacity: .5; }
     }
     .card-content { position: relative; z-index: 1; padding: clamp(16px, 3vw, 24px); }
+    .hero, .cd-wrap {
+      position: relative;
+      overflow: hidden;
+      padding: 16px 16px 16px 22px;
+      border: 1px solid var(--rl-border);
+      border-radius: 14px;
+      background: var(--rl-surface-2);
+    }
+    .hero::before, .cd-wrap::before {
+      content: "";
+      position: absolute;
+      left: 8px;
+      top: 14px;
+      bottom: 14px;
+      width: 4px;
+      border-radius: 999px;
+      background: var(--rl-tone, var(--rl-accent));
+    }
+    .hero.imminent, .cd-wrap.imminent {
+      border-color: color-mix(in srgb, var(--rl-hot) 45%, var(--rl-border));
+    }
+    .rl-panel-body { position: relative; z-index: 1; }
+    .rl-watermark {
+      position: absolute;
+      right: -12px;
+      bottom: -16px;
+      width: 88px;
+      height: 88px;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .rl-watermark-circle {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: var(--rl-tone, var(--rl-accent));
+      opacity: .14;
+    }
+    .rl-watermark-icon {
+      position: absolute;
+      right: 14px;
+      bottom: 12px;
+      --mdc-icon-size: 38px;
+      color: var(--rl-tone, var(--rl-accent));
+      opacity: .5;
+    }
     .rl-title {
       display: flex;
       align-items: baseline;
@@ -651,34 +692,72 @@ function baseStyles() {
       white-space: nowrap;
     }
     .rl-badge ha-icon { --mdc-icon-size: 12px; }
-    .rl-badge.accent { color: #dbe4ff; border-color: rgba(108, 140, 255, .55); background: rgba(108, 140, 255, .18); }
-    .rl-badge.warn { color: #ffe4bd; border-color: rgba(255, 182, 72, .55); background: rgba(255, 182, 72, .18); }
-    .rl-badge.hot { color: #ffd7d9; border-color: rgba(255, 95, 109, .55); background: rgba(255, 95, 109, .20); }
-    .rl-badge.good { color: #d3ffea; border-color: rgba(87, 230, 161, .5); background: rgba(87, 230, 161, .16); }
-    .rl-badge.muted { color: var(--rl-muted); border-color: var(--rl-border); background: rgba(255, 255, 255, .04); }
+    .rl-badge.accent { color: var(--rl-text); border-color: color-mix(in srgb, var(--rl-accent) 55%, transparent); background: color-mix(in srgb, var(--rl-accent) 20%, transparent); }
+    .rl-badge.warn { color: var(--rl-text); border-color: color-mix(in srgb, var(--rl-warn) 55%, transparent); background: color-mix(in srgb, var(--rl-warn) 20%, transparent); }
+    .rl-badge.hot { color: var(--rl-text); border-color: color-mix(in srgb, var(--rl-hot) 55%, transparent); background: color-mix(in srgb, var(--rl-hot) 20%, transparent); }
+    .rl-badge.good { color: var(--rl-text); border-color: color-mix(in srgb, var(--rl-good) 55%, transparent); background: color-mix(in srgb, var(--rl-good) 20%, transparent); }
+    .rl-badge.muted { color: var(--rl-muted); border-color: var(--rl-border); background: color-mix(in srgb, var(--rl-text) 6%, transparent); }
   `;
 }
 
 // Prefers the tracker's real status text over a guess whenever we have one -
 // Launch Library reports an actual Go/TBD/Hold/Success/Failure/In Flight
 // status, so there's no need to infer it from timing alone the way the old
-// harocketlaunchlive-backed version had to.
-function urgencyBadge(launch, phase) {
+// harocketlaunchlive-backed version had to. Shared by the badge and by the
+// hero/countdown panel's accent bar + watermark color, so both always agree.
+function urgencyTone(launch, phase) {
   const abbrev = launch.statusAbbrev;
-  if (abbrev === "success") return `<span class="rl-badge good"><ha-icon icon="mdi:check-circle-outline"></ha-icon>${escapeHtml(launch.status)}</span>`;
-  if (abbrev === "failure") return `<span class="rl-badge hot"><ha-icon icon="mdi:alert-circle"></ha-icon>${escapeHtml(launch.status)}</span>`;
-  if (abbrev === "hold") return `<span class="rl-badge warn"><ha-icon icon="mdi:pause-circle-outline"></ha-icon>${escapeHtml(launch.status)}</span>`;
-  if (abbrev === "inflight" || abbrev === "in flight") return `<span class="rl-badge hot"><ha-icon icon="mdi:rocket-launch"></ha-icon>In Flight</span>`;
-  if (abbrev === "tbd") return `<span class="rl-badge muted"><ha-icon icon="mdi:help-circle-outline"></ha-icon>To Be Determined</span>`;
-  if (phase === "stale") return `<span class="rl-badge muted"><ha-icon icon="mdi:help-circle-outline"></ha-icon>Awaiting update</span>`;
-  if (phase === "window") return `<span class="rl-badge hot"><ha-icon icon="mdi:rocket-launch"></ha-icon>In launch window</span>`;
-  if (launch.status) return `<span class="rl-badge accent"><ha-icon icon="mdi:calendar-clock"></ha-icon>${escapeHtml(launch.status)}</span>`;
-  return `<span class="rl-badge accent"><ha-icon icon="mdi:calendar-clock"></ha-icon>Scheduled</span>`;
+  if (abbrev === "success") return "good";
+  if (abbrev === "failure") return "hot";
+  if (abbrev === "hold") return "warn";
+  if (abbrev === "inflight" || abbrev === "in flight") return "hot";
+  if (abbrev === "tbd") return "muted";
+  if (phase === "stale") return "muted";
+  if (phase === "window") return "hot";
+  return "accent";
+}
+
+function toneStyleAttr(tone) {
+  const varName = { good: "--rl-good", warn: "--rl-warn", hot: "--rl-hot", muted: "--rl-muted", accent: "--rl-accent" }[tone] || "--rl-accent";
+  return `--rl-tone: var(${varName})`;
+}
+
+function urgencyBadge(launch, phase) {
+  const tone = urgencyTone(launch, phase);
+  const abbrev = launch.statusAbbrev;
+  let icon = "mdi:calendar-clock";
+  let text = launch.status || "Scheduled";
+  if (abbrev === "success") icon = "mdi:check-circle-outline";
+  else if (abbrev === "failure") icon = "mdi:alert-circle";
+  else if (abbrev === "hold") icon = "mdi:pause-circle-outline";
+  else if (abbrev === "inflight" || abbrev === "in flight") {
+    icon = "mdi:rocket-launch";
+    text = "In Flight";
+  } else if (abbrev === "tbd") {
+    icon = "mdi:help-circle-outline";
+    text = "To Be Determined";
+  } else if (phase === "stale") {
+    icon = "mdi:help-circle-outline";
+    text = "Awaiting update";
+  } else if (phase === "window") {
+    icon = "mdi:rocket-launch";
+    text = "In launch window";
+  }
+  return `<span class="rl-badge ${tone}"><ha-icon icon="${icon}"></ha-icon>${escapeHtml(text)}</span>`;
 }
 
 function delayBadge(delayInfo) {
   if (!delayInfo?.delayed) return "";
   return `<span class="rl-badge warn"><ha-icon icon="mdi:clock-alert-outline"></ha-icon>Slipped from ${escapeHtml(formatShortClock(delayInfo.originalTs))}</span>`;
+}
+
+function watermarkHtml() {
+  return `
+    <div class="rl-watermark" aria-hidden="true">
+      <span class="rl-watermark-circle"></span>
+      <ha-icon class="rl-watermark-icon" icon="mdi:rocket-launch"></ha-icon>
+    </div>
+  `;
 }
 
 // --- rocket-launch-card (main list) ----------------------------------------
@@ -797,23 +876,27 @@ class RocketLaunchCard extends HTMLElement {
     const delayInfo = trackDelay(launch);
     const seconds = launch.targetTs != null ? launch.targetTs - now / 1000 : 0;
     const countdown = launch.targetTs == null ? "— : — : —" : formatCountdown(seconds);
+    const tone = urgencyTone(launch, phase);
     const urgent = phase === "window" || launch.statusAbbrev === "inflight";
 
     return `
-      <article class="hero ${urgent ? "imminent" : ""}">
-        <div class="hero-top">
-          ${urgencyBadge(launch, phase)}
-          ${delayBadge(delayInfo)}
+      <article class="hero ${urgent ? "imminent" : ""}" style="${toneStyleAttr(tone)}">
+        ${watermarkHtml()}
+        <div class="rl-panel-body">
+          <div class="hero-top">
+            ${urgencyBadge(launch, phase)}
+            ${delayBadge(delayInfo)}
+          </div>
+          <div class="hero-name">${escapeHtml(launch.missionName)}</div>
+          <div class="hero-meta">${escapeHtml(launch.provider)}${launch.rocket ? ` · ${escapeHtml(launch.rocket)}` : ""}</div>
+          <div class="hero-countdown">${escapeHtml(countdown)}</div>
+          <div class="hero-detail">
+            ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
+            ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
+            ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
+          </div>
+          ${this._config.show_description && launch.missionDescription ? `<div class="hero-description">${escapeHtml(launch.missionDescription)}</div>` : ""}
         </div>
-        <div class="hero-name">${escapeHtml(launch.missionName)}</div>
-        <div class="hero-meta">${escapeHtml(launch.provider)}${launch.rocket ? ` · ${escapeHtml(launch.rocket)}` : ""}</div>
-        <div class="hero-countdown">${escapeHtml(countdown)}</div>
-        <div class="hero-detail">
-          ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
-          ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
-          ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
-        </div>
-        ${this._config.show_description && launch.missionDescription ? `<div class="hero-description">${escapeHtml(launch.missionDescription)}</div>` : ""}
       </article>
     `;
   }
@@ -852,24 +935,12 @@ class RocketLaunchCard extends HTMLElement {
   _styles() {
     return `
       .rl-list { display: flex; flex-direction: column; gap: 10px; }
-      .hero {
-        position: relative;
-        overflow: hidden;
-        padding: 16px 18px;
-        border: 1px solid var(--rl-border);
-        border-radius: 20px;
-        background:
-          radial-gradient(circle at 12% -20%, rgba(108, 140, 255, .30), transparent 55%),
-          radial-gradient(circle at 105% 130%, rgba(127, 224, 255, .18), transparent 50%),
-          var(--rl-surface-2);
-      }
       .hero.imminent {
-        border-color: rgba(255, 95, 109, .5);
         animation: rl-pulse 2.4s ease-in-out infinite;
       }
       @keyframes rl-pulse {
-        0%, 100% { box-shadow: 0 0 0 rgba(255, 95, 109, 0); }
-        50% { box-shadow: 0 0 26px rgba(255, 95, 109, .28); }
+        0%, 100% { box-shadow: 0 0 0 rgba(224, 87, 76, 0); }
+        50% { box-shadow: 0 0 20px color-mix(in srgb, var(--rl-hot) 30%, transparent); }
       }
       .hero-top { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
       .hero-name { font-size: 18px; font-weight: 800; letter-spacing: -.01em; }
@@ -880,10 +951,7 @@ class RocketLaunchCard extends HTMLElement {
         font-size: clamp(26px, 6vw, 36px);
         font-weight: 700;
         letter-spacing: .02em;
-        background: linear-gradient(90deg, var(--rl-accent-2), var(--rl-accent));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
+        color: var(--rl-tone, var(--rl-accent));
       }
       .hero-detail {
         display: flex;
@@ -1046,6 +1114,7 @@ class RocketLaunchCountdownCard extends HTMLElement {
     const delayInfo = trackDelay(launch);
     const seconds = launch.targetTs != null ? launch.targetTs - now / 1000 : 0;
     const countdown = phase === "stale" ? "Awaiting updated status…" : launch.targetTs == null ? "Date TBD" : formatCountdown(seconds);
+    const tone = urgencyTone(launch, phase);
     const urgent = phase === "window" || launch.statusAbbrev === "inflight";
 
     return `
@@ -1056,15 +1125,18 @@ class RocketLaunchCountdownCard extends HTMLElement {
             <h2>${escapeHtml(this._config.title || DEFAULT_COUNTDOWN_CONFIG.title)}</h2>
             ${urgencyBadge(launch, phase)}
           </div>
-          <div class="cd-wrap ${urgent ? "imminent" : ""}">
-            <div class="cd-name">${escapeHtml(launch.missionName)}</div>
-            <div class="cd-meta">${escapeHtml(launch.provider)}${launch.rocket ? ` · ${escapeHtml(launch.rocket)}` : ""}</div>
-            <div class="cd-big ${phase === "stale" || launch.targetTs == null ? "cd-big-text" : ""}">${escapeHtml(countdown)}</div>
-            ${delayBadge(delayInfo)}
-            <div class="cd-detail">
-              ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
-              ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
-              ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
+          <div class="cd-wrap ${urgent ? "imminent" : ""}" style="${toneStyleAttr(tone)}">
+            ${watermarkHtml()}
+            <div class="rl-panel-body">
+              <div class="cd-name">${escapeHtml(launch.missionName)}</div>
+              <div class="cd-meta">${escapeHtml(launch.provider)}${launch.rocket ? ` · ${escapeHtml(launch.rocket)}` : ""}</div>
+              <div class="cd-big ${phase === "stale" || launch.targetTs == null ? "cd-big-text" : ""}">${escapeHtml(countdown)}</div>
+              ${delayBadge(delayInfo)}
+              <div class="cd-detail">
+                ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
+                ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
+                ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
+              </div>
             </div>
           </div>
         </div>
@@ -1106,19 +1178,15 @@ class RocketLaunchCountdownCard extends HTMLElement {
       }
       .rl-dormant ha-icon { --mdc-icon-size: 18px; flex: 0 0 auto; }
       .cd-wrap {
-        position: relative;
-        overflow: hidden;
-        padding: 18px;
-        border: 1px solid var(--rl-border);
-        border-radius: 20px;
+        padding: 20px 18px 20px 26px;
         text-align: center;
-        background:
-          radial-gradient(circle at 50% -30%, rgba(108, 140, 255, .32), transparent 60%),
-          var(--rl-surface-2);
       }
       .cd-wrap.imminent {
-        border-color: rgba(255, 95, 109, .55);
         animation: rl-pulse 2.4s ease-in-out infinite;
+      }
+      @keyframes rl-pulse {
+        0%, 100% { box-shadow: 0 0 0 rgba(224, 87, 76, 0); }
+        50% { box-shadow: 0 0 20px color-mix(in srgb, var(--rl-hot) 30%, transparent); }
       }
       .cd-name { font-size: 17px; font-weight: 800; }
       .cd-meta { margin-top: 2px; color: var(--rl-muted); font-size: 12px; }
@@ -1128,17 +1196,12 @@ class RocketLaunchCountdownCard extends HTMLElement {
         font-size: clamp(32px, 9vw, 52px);
         font-weight: 700;
         letter-spacing: .01em;
-        background: linear-gradient(90deg, var(--rl-accent-2), var(--rl-accent));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
+        color: var(--rl-tone, var(--rl-accent));
       }
       .cd-big-text {
         font-family: inherit;
         font-size: 16px;
         font-weight: 700;
-        background: none;
-        -webkit-text-fill-color: initial;
         color: var(--rl-muted);
       }
       .cd-detail {
