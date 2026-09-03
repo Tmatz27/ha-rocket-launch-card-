@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.3
+
+- Added a fourth blueprint, **pet safety alert**: a short-notice reminder
+  (default T-15 minutes) to bring pets inside before a nearby launch's
+  acoustic shock. Skipped entirely (not shifted, unlike the countdown
+  alert) when that moment falls outside a configurable
+  earliest-morning/bedtime window, since a launch that late or early means
+  pets are already in for the night
+- Companion fix in `ha-rocket-launch-tracker` v0.1.2: the site filter now
+  resolves to an exact Launch Library location id instead of a text filter
+  that was never confirmed to work against the launch endpoint - see that
+  repo's changelog. No changes needed here; just update the integration.
+
 ## 0.2.2
 
 - Added a third blueprint, **reschedule alert**: notifies you whenever the

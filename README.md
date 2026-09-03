@@ -16,7 +16,7 @@ This is the frontend half of a two-repo project:
   **server-side** to whatever launch site you configure, and exposes it as
   Home Assistant sensors. Install this first — the cards below read its
   entities.
-- **This repo** — the two Lovelace cards and three automation blueprints
+- **This repo** — the two Lovelace cards and four automation blueprints
   that consume those sensors.
 
 ### Why two repos, and why not the other rocketlaunch.live integration
@@ -42,10 +42,11 @@ one inferred purely from timing.
 - **`rocket-launch-countdown-card`** — a dedicated countdown that stays out
   of the way until the next launch is close, then takes over with a big live
   timer
-- Three **automation blueprints** — a daily "launch today" alert, a
+- Four **automation blueprints** — a daily "launch today" alert, a
   countdown alert capped at a fallback time so an overnight launch still
-  warns you before bed, and a reschedule alert for weather delays or a
-  launch moving earlier than expected
+  warns you before bed, a reschedule alert for weather delays or a launch
+  moving earlier than expected, and a pet-safety alert to bring animals
+  inside before an imminent, nearby launch
 
 ## Requirements
 
@@ -132,7 +133,7 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
 
 ## Automation blueprints
 
-All three live in [`blueprints/automation/`](blueprints/automation) and read
+All four live in [`blueprints/automation/`](blueprints/automation) and read
 the tracker's **Next Launch** sensor (a timestamp entity —
 `sensor.<site>_next_launch`). Import with the buttons below (they open your
 own Home Assistant), or **Settings → Automations & Scenes → Blueprints →
@@ -175,7 +176,22 @@ This also needs a **one-time helper** (same steps as above) — use a
 **different** Text helper than the countdown alert's, since they track
 different things.
 
-All three blueprints need a **notify action** name, e.g.
+### Pet safety alert
+
+A short-notice nudge to bring pets inside before a nearby launch's acoustic
+shock: fires a set number of minutes before launch (default 15), but only
+if that moment falls between an "earliest morning" time and a bedtime
+cutoff (defaults 6:00 AM–8:30 PM). Unlike the countdown alert, a launch
+outside that window is **skipped entirely rather than shifted** — if
+you're already asleep, the pets are already in for the night and there's
+nothing to act on. Optionally personalize the message with your pets'
+names.
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FTmatz27%2Fha-rocket-launch-card-%2Fmain%2Fblueprints%2Fautomation%2Frocket_launch_pet_safety_alert.yaml)
+
+This also needs its own **one-time helper**, separate from the other two.
+
+All four blueprints need a **notify action** name, e.g.
 `notify.mobile_app_your_phone` — find the exact name under **Developer
 Tools → Actions** by searching "notify". `notify.notify` broadcasts to every
 notify target.

@@ -1,0 +1,137 @@
+blueprint:
+  name: Rocket Launch - Pet Safety Alert
+  description: >
+    A short-notice nudge to bring pets inside before a nearby launch's
+    acoustic shock, separate from the other alerts: fires a set number of
+    minutes before launch (default 15), but only if that moment falls
+    before your bedtime cutoff (default 8:30 PM). Unlike the countdown
+    alert, a launch that would fall after the cutoff is skipped entirely
+    rather than shifted earlier - if you're already in bed, the pets are
+    already in for the night and there's nothing to act on.
+  domain: automation
+  source_url: https://github.com/Tmatz27/ha-rocket-launch-card-/blob/main/blueprints/automation/rocket_launch_pet_safety_alert.yaml
+  input:
+    next_launch_entity:
+      name: Next launch sensor
+      description: >
+        The Rocket Launch Tracker integration's "Next Launch" sensor for
+        your site, e.g. sensor.vandenberg_next_launch.
+      selector:
+        entity:
+          filter:
+            integration: rocket_launch_tracker
+            device_class: timestamp
+    minutes_before:
+      name: Minutes before launch
+      default: 15
+      selector:
+        number:
+          min: 2
+          max: 60
+          unit_of_measurement: minutes
+    cutoff_time:
+      name: Bedtime cutoff
+      description: >
+        If the alert moment (minutes-before, above) would fall at or after
+        this clock time, skip it - a launch that late means pets are
+        already in for the night.
+      default: "20:30:00"
+      selector:
+        time: {}
+    earliest_morning_time:
+      name: Earliest morning time
+      description: >
+        The other edge of "asleep": an alert moment earlier than this is
+        also skipped, since a launch at 2 AM means pets are still in for
+        the night, not due for a pre-dawn walk.
+      default: "06:00:00"
+      selector:
+        time: {}
+    pet_names:
+      name: Pet names (optional)
+      description: >
+        Used in the notification, e.g. "Grizzly and Luna". Leave blank for
+        a generic "your pets" message.
+      default: ""
+      selector:
+        text: {}
+    dedup_helper:
+      name: Dedup helper (input_text)
+      description: >
+        An Input Text helper used to remember the last launch alerted, so
+        this does not repeat every minute. Create one under Settings >
+        Devices & Services > Helpers if you don't already have one - use a
+        different helper than the other two blueprints.
+      selector:
+        entity:
+          filter:
+            domain: input_text
+    notify_service:
+      name: Notify action
+      description: >
+        The notify action to call, e.g. notify.mobile_app_your_phone or
+        notify.notify. Find exact names under Developer Tools > Actions by
+        searching "notify".
+      selector:
+        text: {}
+
+trigger:
+  - trigger: time_pattern
+    minutes: "/1"
+
+variables:
+  next_launch_entity: !input next_launch_entity
+  minutes_before: !input minutes_before
+  cutoff_time: !input cutoff_time
+  earliest_morning_time: !input earliest_morning_time
+  pet_names: !input pet_names
+  dedup_helper: !input dedup_helper
+  already_alerted: "{{ states(dedup_helper) }}"
+  raw_state: "{{ states(next_launch_entity) }}"
+  has_value: "{{ raw_state not in ['unknown', 'unavailable', 'none', ''] }}"
+  launch_dt: "{{ as_local(as_datetime(raw_state)) if has_value else None }}"
+  # Same shape as the countdown-alert blueprint's `computed` block and for
+  # the same reason: flat `set` statements ending in one bare
+  # {{ dict(...) }} with no surrounding indentation, so this reliably comes
+  # back as a native value rather than risking a stringified fallback.
+  #
+  # "Before bedtime" is compared as pure time-of-day (minutes since
+  # midnight), not calendar dates - comparing full datetimes against
+  # today_at(cutoff_time) breaks for an early-morning launch (e.g. 1:30 AM),
+  # since "today" at evaluation time is the same calendar date as the
+  # launch, making a 1:15 AM alert look like it's "before" that same day's
+  # 8:30 PM cutoff even though it's actually the middle of the night before.
+  # Comparing minutes-of-day against an explicit [earliest_morning_time,
+  # cutoff_time) window sidesteps that entirely.
+  computed: |-
+    {% set alert_dt = (launch_dt - timedelta(minutes=minutes_before | int)) if has_value else None %}
+    {% set alert_minutes = (alert_dt.hour * 60 + alert_dt.minute) if alert_dt is not none else -1 %}
+    {% set cutoff_parts = cutoff_time.split(':') %}
+    {% set cutoff_minutes = (cutoff_parts[0] | int) * 60 + (cutoff_parts[1] | int) %}
+    {% set morning_parts = earliest_morning_time.split(':') %}
+    {% set morning_minutes = (morning_parts[0] | int) * 60 + (morning_parts[1] | int) %}
+    {% set within_bedtime = has_value and morning_minutes <= alert_minutes < cutoff_minutes %}
+    {% set key = (next_launch_entity ~ '|' ~ raw_state) if has_value else '' %}
+    {% set should_fire = has_value and launch_dt > now() and within_bedtime and now() >= alert_dt and key != already_alerted %}
+    {% set who = pet_names if pet_names else 'your pets' %}
+    {{ dict(fire=should_fire, key=key, who=who) }}
+
+condition:
+  - condition: template
+    value_template: "{{ computed.fire }}"
+
+action:
+  - action: !input notify_service
+    data:
+      title: "🐾 Bring {{ computed.who }} inside"
+      message: >-
+        {{ state_attr(next_launch_entity, 'name') }} launches from
+        {{ state_attr(next_launch_entity, 'pad_name') }} in about
+        {{ minutes_before }} minutes - the launch will be loud nearby.
+  - action: input_text.set_value
+    target:
+      entity_id: !input dedup_helper
+    data:
+      value: "{{ computed.key }}"
+
+mode: single

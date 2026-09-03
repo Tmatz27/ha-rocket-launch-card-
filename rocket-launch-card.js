@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.2.2
+ * Version 0.2.3
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,7 +24,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.2.2";
+const ROCKET_LAUNCH_CARD_VERSION = "0.2.3";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",

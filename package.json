@@ -1,6 +1,6 @@
 {
   "name": "ha-rocket-launch-card",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Modern Home Assistant Lovelace cards for the Rocket Launch Tracker integration, focused on your launch site",
   "type": "module",
