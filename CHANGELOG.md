@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2
+
+- Added a third blueprint, **reschedule alert**: notifies you whenever the
+  next tracked launch's time shifts by more than a configurable amount from
+  what you were last told (weather hold, or moved up earlier than
+  expected). Event-driven off the Next Launch sensor's own state changes,
+  and tracks the launch by Launch Library's own id so turnover to a
+  different launch (today's one flew) doesn't get mistaken for a reschedule
+
 ## 0.2.1
 
 - Restyled both cards to match a flat dark theme instead of the earlier

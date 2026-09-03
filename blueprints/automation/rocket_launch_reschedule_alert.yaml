@@ -1,0 +1,116 @@
+blueprint:
+  name: Rocket Launch - Reschedule Alert
+  description: >
+    Notifies you when the next tracked launch's time changes meaningfully
+    from what you were last told - a weather delay, a hold pushing it back,
+    or it moving up earlier than expected. Distinct from the other two
+    blueprints: this fires on a real schedule change, whenever it happens,
+    not on a fixed daily/hourly check.
+
+    Turnover to a different launch (today's launch flew, so a new one is
+    now "next") is not a reschedule and stays silent - this only fires when
+    the *same* tracked launch's time itself changes.
+
+    Requires a one-time helper: create an Input Text helper (Settings >
+    Devices & Services > Helpers > + Create Helper > Text) to remember the
+    last known launch + time, separate from any helper used by the
+    countdown alert blueprint. Any name works.
+  domain: automation
+  source_url: https://github.com/Tmatz27/ha-rocket-launch-card-/blob/main/blueprints/automation/rocket_launch_reschedule_alert.yaml
+  input:
+    next_launch_entity:
+      name: Next launch sensor
+      description: >
+        The Rocket Launch Tracker integration's "Next Launch" sensor for
+        your site, e.g. sensor.vandenberg_next_launch.
+      selector:
+        entity:
+          filter:
+            integration: rocket_launch_tracker
+            device_class: timestamp
+    min_change_minutes:
+      name: Minimum change to alert on
+      description: >
+        Ignore drift smaller than this (Launch Library's own estimate
+        naturally wobbles by a few minutes as a launch approaches). The
+        comparison is against the last time you were actually notified
+        about, not the very first time this launch was seen, so small
+        changes still add up to an alert once they cross this threshold.
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 180
+          unit_of_measurement: minutes
+    history_helper:
+      name: History helper (input_text)
+      description: >
+        An Input Text helper used to remember the last known launch and
+        time, so turnover to a new launch doesn't look like a reschedule
+        and small changes can accumulate correctly. Create one under
+        Settings > Devices & Services > Helpers if you don't already have
+        one - use a different helper than the countdown alert blueprint.
+      selector:
+        entity:
+          filter:
+            domain: input_text
+    notify_service:
+      name: Notify action
+      description: >
+        The notify action to call, e.g. notify.mobile_app_your_phone or
+        notify.notify. Find exact names under Developer Tools > Actions by
+        searching "notify".
+      selector:
+        text: {}
+
+trigger:
+  - trigger: state
+    entity_id: !input next_launch_entity
+
+variables:
+  next_launch_entity: !input next_launch_entity
+  min_change_minutes: !input min_change_minutes
+  history_helper: !input history_helper
+  new_state: "{{ states(next_launch_entity) }}"
+  new_id: "{{ state_attr(next_launch_entity, 'launch_id') }}"
+  has_new_value: "{{ new_state not in ['unknown', 'unavailable', 'none', ''] and new_id not in [none, ''] }}"
+  previous_raw: "{{ states(history_helper) }}"
+  previous_parts: "{{ previous_raw.split('|') if (previous_raw not in ['unknown', 'unavailable', 'none', ''] and '|' in previous_raw) else [] }}"
+  previous_id: "{{ previous_parts[0] if previous_parts | length == 2 else None }}"
+  previous_ts: "{{ previous_parts[1] if previous_parts | length == 2 else None }}"
+  # Every branch ends in one bare {{ dict(...) }} with no surrounding
+  # indentation, same reasoning as the countdown-alert blueprint's
+  # `computed` template: it keeps this a single native value HA can read
+  # `computed.fire` off of, instead of risking a stringified fallback.
+  computed: |-
+    {% set same_launch = has_new_value and previous_id is not none and previous_id == new_id %}
+    {% set new_dt = as_local(as_datetime(new_state)) if has_new_value else None %}
+    {% set old_dt = as_local(as_datetime(previous_ts)) if (same_launch and previous_ts not in [None, '']) else None %}
+    {% set changed_enough = same_launch and old_dt is not none and new_dt is not none and ((new_dt - old_dt).total_seconds() | abs) >= (min_change_minutes | int) * 60 %}
+    {% set direction = 'delayed' if (changed_enough and new_dt > old_dt) else 'moved earlier' %}
+    {% set keep_baseline = same_launch and not changed_enough %}
+    {% set new_key = previous_raw if keep_baseline else ((new_id ~ '|' ~ new_state) if has_new_value else previous_raw) %}
+    {% set new_time_str = (new_dt | as_timestamp | timestamp_custom('%a %-I:%M %p')) if new_dt is not none else '' %}
+    {% set old_time_str = (old_dt | as_timestamp | timestamp_custom('%a %-I:%M %p')) if old_dt is not none else '' %}
+    {{ dict(fire=changed_enough, direction=direction, new_key=new_key, new_time_str=new_time_str, old_time_str=old_time_str) }}
+
+condition:
+  - condition: template
+    value_template: "{{ computed.fire }}"
+
+action:
+  - action: !input notify_service
+    data:
+      title: >-
+        {{ '🌩️ Launch delayed' if computed.direction == 'delayed' else '⏱️ Launch moved earlier' }}
+      message: >-
+        {{ state_attr(next_launch_entity, 'name') }}
+        ({{ state_attr(next_launch_entity, 'provider') }}) now targets
+        {{ computed.new_time_str }} (was {{ computed.old_time_str }}).
+  - action: input_text.set_value
+    target:
+      entity_id: !input history_helper
+    data:
+      value: "{{ computed.new_key }}"
+
+mode: single

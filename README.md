@@ -16,8 +16,8 @@ This is the frontend half of a two-repo project:
   **server-side** to whatever launch site you configure, and exposes it as
   Home Assistant sensors. Install this first — the cards below read its
   entities.
-- **This repo** — the two Lovelace cards and two automation blueprints that
-  consume those sensors.
+- **This repo** — the two Lovelace cards and three automation blueprints
+  that consume those sensors.
 
 ### Why two repos, and why not the other rocketlaunch.live integration
 
@@ -42,9 +42,10 @@ one inferred purely from timing.
 - **`rocket-launch-countdown-card`** — a dedicated countdown that stays out
   of the way until the next launch is close, then takes over with a big live
   timer
-- Two **automation blueprints** — a daily "launch today" alert, and a
+- Three **automation blueprints** — a daily "launch today" alert, a
   countdown alert capped at a fallback time so an overnight launch still
-  warns you before bed
+  warns you before bed, and a reschedule alert for weather delays or a
+  launch moving earlier than expected
 
 ## Requirements
 
@@ -131,11 +132,11 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
 
 ## Automation blueprints
 
-Both live in [`blueprints/automation/`](blueprints/automation) and read the
-tracker's **Next Launch** sensor (a timestamp entity — `sensor.<site>_next_launch`).
-Import with the buttons below (they open your own Home Assistant), or
-**Settings → Automations & Scenes → Blueprints → Import Blueprint** and paste
-the raw GitHub URL.
+All three live in [`blueprints/automation/`](blueprints/automation) and read
+the tracker's **Next Launch** sensor (a timestamp entity —
+`sensor.<site>_next_launch`). Import with the buttons below (they open your
+own Home Assistant), or **Settings → Automations & Scenes → Blueprints →
+Import Blueprint** and paste the raw GitHub URL.
 
 ### Launch day alert
 
@@ -159,7 +160,22 @@ repeat itself: **Settings → Devices & Services → Helpers → + Create Helper
 Text**, name it anything (e.g. "Rocket Launch Alert Sent"), and pick it for
 the blueprint's *Dedup helper* input.
 
-Both blueprints need a **notify action** name, e.g.
+### Reschedule alert
+
+Fires whenever the next tracked launch's time changes by more than a
+configurable amount (default 15 minutes) from what you were last told —
+a weather hold pushing it back, or it moving up earlier than expected —
+naming the old and new time. Event-driven (fires on the change itself, not
+a fixed check interval), and stays silent when a different launch simply
+becomes "next" after today's one flies — that's not a reschedule.
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FTmatz27%2Fha-rocket-launch-card-%2Fmain%2Fblueprints%2Fautomation%2Frocket_launch_reschedule_alert.yaml)
+
+This also needs a **one-time helper** (same steps as above) — use a
+**different** Text helper than the countdown alert's, since they track
+different things.
+
+All three blueprints need a **notify action** name, e.g.
 `notify.mobile_app_your_phone` — find the exact name under **Developer
 Tools → Actions** by searching "notify". `notify.notify` broadcasts to every
 notify target.
