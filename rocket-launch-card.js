@@ -1,40 +1,41 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.1.0
+ * Version 0.2.0
  *
- * Two custom cards backed by djtimca/harocketlaunchlive (Rocket Launch Live):
- *   - rocket-launch-card: an upcoming-launches list, filtered to a launch site,
+ * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
+ * custom integration that polls Launch Library 2 (thespacedevs.com),
+ * filtered server-side to a launch site, with adaptive polling (slow far
+ * out, fast once a launch is close). This replaces the earlier 0.1.x design,
+ * which read djtimca/harocketlaunchlive's fixed "next 5 launches worldwide"
+ * sensors and filtered client-side - that upstream integration has no site
+ * filter of its own, so a matching launch could simply not be in the data
+ * yet. This version's filtering happens at the data source instead.
+ *
+ *   - rocket-launch-card: the upcoming-launches list for one tracked site,
  *     with a live ticking countdown for near-term launches.
- *   - rocket-launch-countdown-card: a dedicated countdown that appears once the
- *     next matching launch is inside a configurable window.
+ *   - rocket-launch-countdown-card: a dedicated countdown that appears once
+ *     the next launch is inside a configurable window.
  *
- * The upstream integration always exposes exactly the next 5 GLOBAL launches
- * as sensor.rocket_launch_1..5 (no per-site filtering, no explicit delay/hold
- * status). Everything site-specific, live-countdown, and delay-aware here is
- * computed client-side from those five sensors' attributes.
+ * Both cards read ONE entity: the tracker integration's "Upcoming Launches"
+ * sensor, whose `launches` attribute is the full, already-filtered,
+ * soonest-first list.
  *
  * Copyright (c) 2026 Travis Matzdorf
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.1.0";
-
-const DEFAULT_ENTITY_PREFIX = "sensor.rocket_launch_";
+const ROCKET_LAUNCH_CARD_VERSION = "0.2.0";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
-  site_filter: "Vandenberg",
-  entity_prefix: DEFAULT_ENTITY_PREFIX,
+  entity: "",
   live_window_hours: 24,
-  show_other_launches: false,
-  show_weather: true,
   show_description: true,
 });
 
 const DEFAULT_COUNTDOWN_CONFIG = Object.freeze({
   title: "Launch Countdown",
-  site_filter: "Vandenberg",
-  entity_prefix: DEFAULT_ENTITY_PREFIX,
+  entity: "",
   trigger_hours: 2,
   show_when_inactive: true,
 });
@@ -65,8 +66,6 @@ const escapeHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const sameConfig = (left, right) => {
@@ -79,95 +78,70 @@ const sameConfig = (left, right) => {
 
 // --- Launch data -----------------------------------------------------------
 
-function normalizeTimestamp(value) {
-  if (value === "" || value === null || value === undefined) return null;
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
+function parseIsoToEpochSeconds(iso) {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms / 1000 : null;
 }
 
-function normalizeDate(value) {
-  if (!value || value === "NA") return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
+// Normalizes one entry of the tracker integration's `launches` attribute
+// (itself already normalized server-side by the integration's api.py) into
+// the shape this file renders. Every field is defensive against a missing
+// or renamed upstream key, since the row is just a plain object off the
+// wire, not something this file controls the shape of.
+function normalizeLaunch(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    id: raw.id ?? null,
+    name: raw.name || "Unknown launch",
+    missionName: raw.mission_name || raw.name || "Unknown launch",
+    missionDescription: raw.mission_description || "",
+    status: raw.status || "",
+    statusAbbrev: String(raw.status_abbrev || "").toLowerCase(),
+    provider: raw.provider || "",
+    rocket: raw.rocket || "",
+    padName: raw.pad_name || "",
+    locationName: raw.location_name || "",
+    netPrecision: raw.net_precision || "",
+    targetTs: parseIsoToEpochSeconds(raw.net) ?? parseIsoToEpochSeconds(raw.window_start),
+    windowStartTs: parseIsoToEpochSeconds(raw.window_start),
+    windowEndTs: parseIsoToEpochSeconds(raw.window_end),
+    probability: Number.isFinite(raw.probability) ? raw.probability : null,
+    image: raw.image || "",
+    webcastLive: Boolean(raw.webcast_live),
+    holdReason: raw.hold_reason || "",
+    failReason: raw.fail_reason || "",
+  };
 }
 
-function truthyFlag(value) {
-  return String(value ?? "").toLowerCase() === "true";
-}
-
-function readLaunch(hass, entityId) {
+function readUpcomingEntity(hass, entityId) {
+  if (!entityId) return { missingConfig: true, launches: [], lastUpdated: "" };
   const state = hass?.states?.[entityId];
-  if (!state) return null;
-  const a = state.attributes || {};
+  if (!state) return { missingEntity: true, launches: [], lastUpdated: "" };
+  const attrs = state.attributes || {};
+  const launches = Array.isArray(attrs.launches) ? attrs.launches.map(normalizeLaunch).filter(Boolean) : [];
   return {
     entityId,
-    name: a.name || state.state || "Unknown launch",
-    provider: a.provider || "",
-    vehicle: a.vehicle || "",
-    pad: a.launch_pad || "",
-    country: a.launch_location || "",
-    usState: a.launch_US_state || "",
-    missions: a.launch_missions || "",
-    description: a.launch_description || "",
-    mediaLink: a.launch_media_link || "",
-    warning24h: truthyFlag(a.launch_24h_warning),
-    warning20m: truthyFlag(a.launch_20m_warning),
-    targetTs: normalizeTimestamp(a.launch_target_timestamp),
-    dateTarget: a.launch_date_target && a.launch_date_target !== "NA" ? a.launch_date_target : "",
-    estDate: normalizeDate(a.est_launch_date),
-    tags: (a.tags || "")
-      .split("|")
-      .map((t) => t.trim())
-      .filter(Boolean),
-    weatherSummary: a.weather_summary && a.weather_summary !== "TBD" ? a.weather_summary : "",
-    weatherTemp: a.weather_temp,
+    siteFilter: attrs.site_filter || "",
+    launches,
     lastUpdated: state.last_updated || "",
   };
 }
 
-function collectLaunches(hass, entityPrefix) {
-  const prefix = entityPrefix || DEFAULT_ENTITY_PREFIX;
-  const states = hass?.states || {};
-  const pattern = new RegExp(`^${escapeRegExp(prefix)}\\d+$`);
-  return Object.keys(states)
-    .filter((id) => pattern.test(id))
-    .sort((a, b) => Number(a.slice(prefix.length)) - Number(b.slice(prefix.length)))
-    .map((id) => readLaunch(hass, id))
-    .filter(Boolean);
-}
-
-function matchesSite(launch, filter) {
-  const needle = String(filter || "").trim().toLowerCase();
-  if (!needle) return true;
-  return [launch.pad, launch.country, launch.usState].some((field) =>
-    String(field || "").toLowerCase().includes(needle),
-  );
-}
-
-function byTargetAscending(a, b) {
-  if (a.targetTs == null && b.targetTs == null) return 0;
-  if (a.targetTs == null) return 1;
-  if (b.targetTs == null) return -1;
-  return a.targetTs - b.targetTs;
-}
-
-function splitLaunches(launches, siteFilter) {
-  const matches = [];
-  const others = [];
-  for (const launch of launches) (matchesSite(launch, siteFilter) ? matches : others).push(launch);
-  matches.sort(byTargetAscending);
-  others.sort(byTargetAscending);
-  return { matches, others };
-}
+// Statuses that stay visually prominent (the main list's "hero" tier and the
+// countdown card's active state) regardless of how far off the target time
+// looks, since these mean something is actively happening or unresolved.
+const ALWAYS_PROMINENT_STATUSES = new Set(["inflight", "hold"]);
 
 function launchKey(launch) {
-  return `${launch.name}|${launch.provider}|${launch.pad}`.toLowerCase();
+  // Launch Library assigns a stable id per launch; that's a far better
+  // identity for delay tracking than name/pad text, which can legitimately
+  // repeat across missions. Fall back to a composite only if id is missing.
+  return launch.id ? `id:${launch.id}` : `${launch.name}|${launch.provider}|${launch.padName}`.toLowerCase();
 }
 
-// --- Delay tracking (localStorage; keyed by mission identity, not entity_id,
-// since the integration reassigns sensor_1..5 to whichever launches are
-// soonest and a given index can refer to a different mission from one poll
-// to the next) -------------------------------------------------------------
+// --- Delay tracking (localStorage; keyed by launch identity, not list
+// position, since a poll can reorder or replace entries) -------------------
 
 function pruneDelayStoreOnce() {
   if (delayStorePruned) return;
@@ -260,15 +234,6 @@ function formatShortClock(epochSeconds) {
   }
 }
 
-function formatDateOnly(date) {
-  if (!date) return "";
-  try {
-    return new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(date);
-  } catch {
-    return date.toDateString();
-  }
-}
-
 function formatRelative(seconds) {
   const s = Math.max(0, Math.round(seconds));
   const days = Math.floor(s / 86400);
@@ -293,13 +258,17 @@ function formatAgo(isoString, nowMs) {
 // diffMs > 0 => still counting down. Once past target, "window" covers a
 // short grace period (holds, final polling lag) before falling back to
 // "stale", which stops the timer instead of counting up indefinitely against
-// data that is probably just waiting on the next 60s integration poll.
+// data that is probably just waiting on the next poll.
 function launchPhase(launch, nowMs) {
   if (launch.targetTs == null) return "no-time";
   const diffMs = launch.targetTs * 1000 - nowMs;
   if (diffMs > 0) return "counting";
   if (diffMs > -STALE_AFTER_MS) return "window";
   return "stale";
+}
+
+function isProminent(launch, phase) {
+  return phase === "window" || ALWAYS_PROMINENT_STATUSES.has(launch.statusAbbrev);
 }
 
 // --- Shared editor base --------------------------------------------------
@@ -318,6 +287,7 @@ const EDITOR_STYLES = `
     min-height: 34px;
     margin-bottom: 8px;
   }
+  .row-full { margin-bottom: 8px; }
   .label { flex: 1; font-size: 13px; }
   .hint {
     margin: -4px 0 10px;
@@ -375,6 +345,9 @@ class RocketLaunchEditorBase extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this.shadowRoot?.querySelectorAll("[data-entity]").forEach((picker) => {
+      picker.hass = hass;
+    });
   }
 
   setConfig(config) {
@@ -425,6 +398,16 @@ class RocketLaunchEditorBase extends HTMLElement {
         this._update(input.dataset.number, value);
       });
     });
+    this.shadowRoot.querySelectorAll("[data-entity]").forEach((picker) => {
+      const key = picker.dataset.entity;
+      picker.hass = this._hass;
+      picker.value = this._config[key] || "";
+      picker.includeDomains = ["sensor"];
+      picker.addEventListener("value-changed", (event) => {
+        event.stopPropagation();
+        this._update(key, event.detail.value || "");
+      });
+    });
 
     this._rendered = true;
   }
@@ -432,6 +415,14 @@ class RocketLaunchEditorBase extends HTMLElement {
   _renderField(field) {
     const value = this._config[field.key];
     const hint = field.hint ? `<div class="hint">${escapeHtml(field.hint)}</div>` : "";
+    if (field.type === "entity") {
+      return `
+        <div class="row-full">
+          <ha-entity-picker data-entity="${field.key}" label="${escapeHtml(field.label)}" allow-custom-entity></ha-entity-picker>
+        </div>
+        ${hint}
+      `;
+    }
     if (field.type === "toggle") {
       return `
         <div class="row">
@@ -470,11 +461,10 @@ class RocketLaunchCardEditor extends RocketLaunchEditorBase {
     super(DEFAULT_MAIN_CONFIG, [
       { type: "text", key: "title", label: "Title", placeholder: DEFAULT_MAIN_CONFIG.title },
       {
-        type: "text",
-        key: "site_filter",
-        label: "Site filter",
-        placeholder: "Vandenberg",
-        hint: 'Matches against launch pad, state, and country (e.g. "Vandenberg", "Cape Canaveral", "CA"). Leave blank to show every tracked launch.',
+        type: "entity",
+        key: "entity",
+        label: "Upcoming launches sensor",
+        hint: 'The Rocket Launch Tracker integration\'s "Upcoming Launches" sensor for the site you want, e.g. sensor.vandenberg_upcoming_launches.',
       },
       {
         type: "number",
@@ -483,15 +473,8 @@ class RocketLaunchCardEditor extends RocketLaunchEditorBase {
         min: 1,
         max: 96,
         default: DEFAULT_MAIN_CONFIG.live_window_hours,
-        hint: "Launches inside this window get the big live countdown treatment. Farther-out launches show as a simple line, same as the upstream card.",
+        hint: "Launches inside this window get the big live countdown treatment. Farther-out launches show as a simple line.",
       },
-      {
-        type: "toggle",
-        key: "show_other_launches",
-        label: "Show non-matching launches too",
-        hint: "Adds a compact secondary list of the other tracked launches that do not match the site filter.",
-      },
-      { type: "toggle", key: "show_weather", label: "Show weather" },
       { type: "toggle", key: "show_description", label: "Show mission description" },
     ]);
   }
@@ -502,11 +485,10 @@ class RocketLaunchCountdownCardEditor extends RocketLaunchEditorBase {
     super(DEFAULT_COUNTDOWN_CONFIG, [
       { type: "text", key: "title", label: "Title", placeholder: DEFAULT_COUNTDOWN_CONFIG.title },
       {
-        type: "text",
-        key: "site_filter",
-        label: "Site filter",
-        placeholder: "Vandenberg",
-        hint: "Same matching as the main card. Leave blank to track the very next launch from anywhere.",
+        type: "entity",
+        key: "entity",
+        label: "Upcoming launches sensor",
+        hint: "Same sensor as the main card - the countdown tracks whichever launch is first in its list.",
       },
       {
         type: "number",
@@ -526,14 +508,35 @@ class RocketLaunchCountdownCardEditor extends RocketLaunchEditorBase {
   }
 }
 
-// --- Shared card chrome (icon, empty states, styles) ------------------------
+// --- Shared card chrome (empty states, styles, starfield) -------------------
 
-function integrationMissingHtml() {
+function noEntityHtml(kind) {
   return `
     <div class="rl-empty">
       <ha-icon icon="mdi:rocket-outline"></ha-icon>
-      <strong>No Rocket Launch Live sensors found</strong>
-      <span>Install and configure the harocketlaunchlive integration, or check the entity prefix in the card config.</span>
+      <strong>${kind === "missingConfig" ? "No sensor selected" : "Sensor not found"}</strong>
+      <span>${
+        kind === "missingConfig"
+          ? "Pick the Rocket Launch Tracker integration's “Upcoming Launches” sensor in the card editor."
+          : "The configured entity doesn't exist. Check that Rocket Launch Tracker is installed and set up for this site."
+      }</span>
+    </div>
+  `;
+}
+
+function starfieldHtml() {
+  // Purely decorative, themable via --rl-star-opacity; kept cheap (a handful
+  // of fixed-position dots, no per-frame JS) so it never competes with the
+  // live countdown for render budget.
+  return `
+    <div class="rl-stars" aria-hidden="true">
+      <span class="rl-star" style="top:8%;left:12%;--d:0s"></span>
+      <span class="rl-star" style="top:18%;left:78%;--d:.6s"></span>
+      <span class="rl-star" style="top:35%;left:92%;--d:1.4s"></span>
+      <span class="rl-star" style="top:12%;left:45%;--d:2.1s"></span>
+      <span class="rl-star" style="top:70%;left:88%;--d:.9s"></span>
+      <span class="rl-star" style="top:82%;left:8%;--d:1.8s"></span>
+      <span class="rl-moon" title="">🌙</span>
     </div>
   `;
 }
@@ -557,6 +560,7 @@ function baseStyles() {
     }
     * { box-sizing: border-box; }
     ha-card {
+      position: relative;
       overflow: hidden;
       border: 1px solid var(--rl-border);
       border-radius: var(--ha-card-border-radius, 26px);
@@ -566,7 +570,36 @@ function baseStyles() {
         var(--rl-surface);
       box-shadow: var(--ha-card-box-shadow, 0 10px 30px rgba(0, 0, 0, .22));
     }
-    .card-content { padding: clamp(16px, 3vw, 24px); }
+    .rl-stars {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .rl-star {
+      position: absolute;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: #fff;
+      opacity: .45;
+      animation: rl-twinkle 3.2s ease-in-out infinite;
+      animation-delay: var(--d, 0s);
+    }
+    .rl-moon {
+      position: absolute;
+      top: 6%;
+      right: 6%;
+      font-size: 16px;
+      opacity: .55;
+      filter: drop-shadow(0 0 6px rgba(127, 224, 255, .35));
+    }
+    @keyframes rl-twinkle {
+      0%, 100% { opacity: .15; }
+      50% { opacity: .8; }
+    }
+    .card-content { position: relative; z-index: 1; padding: clamp(16px, 3vw, 24px); }
     .rl-title {
       display: flex;
       align-items: baseline;
@@ -626,11 +659,20 @@ function baseStyles() {
   `;
 }
 
+// Prefers the tracker's real status text over a guess whenever we have one -
+// Launch Library reports an actual Go/TBD/Hold/Success/Failure/In Flight
+// status, so there's no need to infer it from timing alone the way the old
+// harocketlaunchlive-backed version had to.
 function urgencyBadge(launch, phase) {
+  const abbrev = launch.statusAbbrev;
+  if (abbrev === "success") return `<span class="rl-badge good"><ha-icon icon="mdi:check-circle-outline"></ha-icon>${escapeHtml(launch.status)}</span>`;
+  if (abbrev === "failure") return `<span class="rl-badge hot"><ha-icon icon="mdi:alert-circle"></ha-icon>${escapeHtml(launch.status)}</span>`;
+  if (abbrev === "hold") return `<span class="rl-badge warn"><ha-icon icon="mdi:pause-circle-outline"></ha-icon>${escapeHtml(launch.status)}</span>`;
+  if (abbrev === "inflight" || abbrev === "in flight") return `<span class="rl-badge hot"><ha-icon icon="mdi:rocket-launch"></ha-icon>In Flight</span>`;
+  if (abbrev === "tbd") return `<span class="rl-badge muted"><ha-icon icon="mdi:help-circle-outline"></ha-icon>To Be Determined</span>`;
   if (phase === "stale") return `<span class="rl-badge muted"><ha-icon icon="mdi:help-circle-outline"></ha-icon>Awaiting update</span>`;
   if (phase === "window") return `<span class="rl-badge hot"><ha-icon icon="mdi:rocket-launch"></ha-icon>In launch window</span>`;
-  if (launch.warning20m) return `<span class="rl-badge hot"><ha-icon icon="mdi:timer-alert-outline"></ha-icon>Final countdown</span>`;
-  if (launch.warning24h) return `<span class="rl-badge warn"><ha-icon icon="mdi:timer-outline"></ha-icon>Launching soon</span>`;
+  if (launch.status) return `<span class="rl-badge accent"><ha-icon icon="mdi:calendar-clock"></ha-icon>${escapeHtml(launch.status)}</span>`;
   return `<span class="rl-badge accent"><ha-icon icon="mdi:calendar-clock"></ha-icon>Scheduled</span>`;
 }
 
@@ -700,73 +742,62 @@ class RocketLaunchCard extends HTMLElement {
       return;
     }
 
-    const launches = collectLaunches(this._hass, this._config.entity_prefix);
-    if (launches.length === 0) {
-      this._paint(`<ha-card><div class="card-content">${this._header()}${integrationMissingHtml()}</div></ha-card>`);
+    const data = readUpcomingEntity(this._hass, this._config.entity);
+    if (data.missingConfig || data.missingEntity) {
+      this._paint(`<ha-card>${starfieldHtml()}<div class="card-content">${this._header()}${noEntityHtml(data.missingConfig ? "missingConfig" : "missingEntity")}</div></ha-card>`);
       return;
     }
 
-    const { matches, others } = splitLaunches(launches, this._config.site_filter);
+    const launches = data.launches;
     const liveWindowMs = this._config.live_window_hours * 60 * 60 * 1000;
-    const nearestMs = matches.length && matches[0].targetTs != null ? matches[0].targetTs * 1000 - now : Infinity;
+    const nearestMs = launches.length && launches[0].targetTs != null ? launches[0].targetTs * 1000 - now : Infinity;
     this._ensureTick(nearestMs < FAST_TICK_THRESHOLD_MS ? FAST_TICK_MS : SLOW_TICK_MS);
 
-    const body = matches.length === 0 ? this._emptyMatchHtml() : matches.map((launch) => this._renderLaunch(launch, now, liveWindowMs)).join("");
-
-    const othersHtml =
-      this._config.show_other_launches && others.length
-        ? `
-          <div class="rl-others-divider">Other tracked launches</div>
-          <div class="rl-others">${others.map((launch) => this._renderCompactRow(launch, now)).join("")}</div>
-        `
-        : "";
-
-    const freshest = [...matches, ...others].reduce((latest, l) => (l.lastUpdated > latest ? l.lastUpdated : latest), "");
+    const body = launches.length === 0 ? this._emptyMatchHtml(data.siteFilter) : launches.map((launch) => this._renderLaunch(launch, now, liveWindowMs)).join("");
 
     this._paint(`
       <ha-card>
+        ${starfieldHtml()}
         <div class="card-content">
-          ${this._header()}
+          ${this._header(data.siteFilter)}
           <div class="rl-list">${body}</div>
-          ${othersHtml}
-          ${freshest ? `<div class="rl-footer">Data refreshed ${escapeHtml(formatAgo(freshest, now))}</div>` : ""}
+          ${data.lastUpdated ? `<div class="rl-footer">Data refreshed ${escapeHtml(formatAgo(data.lastUpdated, now))}</div>` : ""}
         </div>
       </ha-card>
     `);
   }
 
-  _header() {
+  _header(siteFilter) {
     return `
       <div class="rl-title">
         <h2>${escapeHtml(this._config.title || DEFAULT_MAIN_CONFIG.title)}</h2>
-        <span class="rl-sub">Next 5 tracked globally</span>
+        <span class="rl-sub">${siteFilter ? escapeHtml(siteFilter) : "All sites"}</span>
       </div>
     `;
   }
 
-  _emptyMatchHtml() {
-    const filter = this._config.site_filter?.trim();
+  _emptyMatchHtml(siteFilter) {
     return `
       <div class="rl-empty">
         <ha-icon icon="mdi:rocket-outline"></ha-icon>
-        <strong>No ${escapeHtml(filter || "matching")} launches right now</strong>
-        <span>The integration only tracks the next 5 launches worldwide, so a ${escapeHtml(filter || "matching")} launch further out won't appear here yet.</span>
+        <strong>No upcoming launches tracked</strong>
+        <span>${siteFilter ? `Nothing currently scheduled at ${escapeHtml(siteFilter)}.` : "Nothing currently scheduled."} This updates automatically as Launch Library adds new launches.</span>
       </div>
     `;
   }
 
   _renderLaunch(launch, now, liveWindowMs) {
     const phase = launchPhase(launch, now);
-    const isLive = launch.targetTs != null && launch.targetTs * 1000 - now < liveWindowMs;
+    const withinWindow = launch.targetTs != null && launch.targetTs * 1000 - now < liveWindowMs;
+    const isLive = withinWindow || isProminent(launch, phase);
     return isLive ? this._renderHero(launch, now, phase) : this._renderCompactRow(launch, now);
   }
 
   _renderHero(launch, now, phase) {
     const delayInfo = trackDelay(launch);
     const seconds = launch.targetTs != null ? launch.targetTs - now / 1000 : 0;
-    const countdown = phase === "counting" ? formatCountdown(seconds) : phase === "window" ? formatCountdown(seconds) : "— : — : —";
-    const urgent = phase === "window" || launch.warning20m;
-    const missionLine = launch.missions ? launch.missions.split("|").map((m) => m.trim()).filter(Boolean).join(" · ") : launch.name;
+    const countdown = launch.targetTs == null ? "— : — : —" : formatCountdown(seconds);
+    const urgent = phase === "window" || launch.statusAbbrev === "inflight";
 
     return `
       <article class="hero ${urgent ? "imminent" : ""}">
@@ -774,27 +805,27 @@ class RocketLaunchCard extends HTMLElement {
           ${urgencyBadge(launch, phase)}
           ${delayBadge(delayInfo)}
         </div>
-        <div class="hero-name">${escapeHtml(missionLine)}</div>
-        <div class="hero-meta">${escapeHtml(launch.provider)}${launch.vehicle ? ` · ${escapeHtml(launch.vehicle)}` : ""}</div>
+        <div class="hero-name">${escapeHtml(launch.missionName)}</div>
+        <div class="hero-meta">${escapeHtml(launch.provider)}${launch.rocket ? ` · ${escapeHtml(launch.rocket)}` : ""}</div>
         <div class="hero-countdown">${escapeHtml(countdown)}</div>
         <div class="hero-detail">
-          <span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.pad)}</span>
+          ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
           ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
-          ${this._config.show_weather && launch.weatherSummary ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(launch.weatherSummary)}${launch.weatherTemp ? ` (${escapeHtml(String(launch.weatherTemp))}°)` : ""}</span>` : ""}
+          ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
         </div>
-        ${this._config.show_description && launch.description ? `<div class="hero-description">${escapeHtml(launch.description)}</div>` : ""}
+        ${this._config.show_description && launch.missionDescription ? `<div class="hero-description">${escapeHtml(launch.missionDescription)}</div>` : ""}
       </article>
     `;
   }
 
   _renderCompactRow(launch, now) {
     const delayInfo = trackDelay(launch);
-    const when = launch.targetTs != null ? formatClock(launch.targetTs) : launch.dateTarget || (launch.estDate ? `NET ${formatDateOnly(launch.estDate)}` : "Date TBD");
+    const when = launch.targetTs != null ? formatClock(launch.targetTs) : launch.netPrecision ? `~${launch.netPrecision} precision` : "Date TBD";
     return `
       <div class="rl-row">
         <div class="rl-row-main">
-          <span class="rl-row-name">${escapeHtml(launch.name)}</span>
-          <span class="rl-row-meta">${escapeHtml(launch.provider)} · ${escapeHtml(launch.pad)}</span>
+          <span class="rl-row-name">${escapeHtml(launch.missionName)}</span>
+          <span class="rl-row-meta">${escapeHtml(launch.provider)}${launch.padName ? ` · ${escapeHtml(launch.padName)}` : ""}</span>
         </div>
         <div class="rl-row-side">
           ${delayBadge(delayInfo)}
@@ -886,17 +917,6 @@ class RocketLaunchCard extends HTMLElement {
       .rl-row-meta { color: var(--rl-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .rl-row-side { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
       .rl-row-when { color: var(--rl-muted); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
-      .rl-others-divider {
-        margin: 14px 0 8px;
-        padding-top: 12px;
-        border-top: 1px solid var(--rl-border);
-        color: var(--rl-muted);
-        font-size: 10.5px;
-        font-weight: 700;
-        letter-spacing: .08em;
-        text-transform: uppercase;
-      }
-      .rl-others { display: flex; flex-direction: column; gap: 8px; }
       @media (max-width: 500px) {
         .hero-countdown { font-size: clamp(22px, 8vw, 30px); }
         .rl-row-meta { display: none; }
@@ -978,81 +998,78 @@ class RocketLaunchCountdownCard extends HTMLElement {
       return;
     }
 
-    const launches = collectLaunches(this._hass, this._config.entity_prefix);
-    if (launches.length === 0) {
-      this._paint(`<ha-card><div class="card-content">${integrationMissingHtml()}</div></ha-card>`, true);
+    const data = readUpcomingEntity(this._hass, this._config.entity);
+    if (data.missingConfig || data.missingEntity) {
+      this._paint(`<ha-card><div class="card-content">${noEntityHtml(data.missingConfig ? "missingConfig" : "missingEntity")}</div></ha-card>`, true);
       return;
     }
 
-    const { matches } = splitLaunches(launches, this._config.site_filter);
-    const next = matches[0];
+    const next = data.launches[0];
     const triggerMs = this._config.trigger_hours * 60 * 60 * 1000;
+    const phase = next ? launchPhase(next, now) : "no-time";
     const withinWindow = next && next.targetTs != null && next.targetTs * 1000 - now <= triggerMs;
+    const active = next && (withinWindow || isProminent(next, phase));
 
-    if (!next || !withinWindow) {
+    if (!active) {
       this._ensureTick(DORMANT_TICK_MS);
       if (!this._config.show_when_inactive) {
         this._paint("", true);
         return;
       }
-      this._paint(this._dormantHtml(next, now), false);
+      this._paint(this._dormantHtml(next, now, data.siteFilter), false);
       return;
     }
 
-    const nearestMs = next.targetTs * 1000 - now;
+    const nearestMs = next.targetTs != null ? next.targetTs * 1000 - now : 0;
     this._ensureTick(nearestMs < FAST_TICK_THRESHOLD_MS ? FAST_TICK_MS : SLOW_TICK_MS);
-    this._paint(this._activeHtml(next, now), false);
+    this._paint(this._activeHtml(next, now, phase), false);
   }
 
-  _dormantHtml(next, now) {
+  _dormantHtml(next, now, siteFilter) {
+    const site = siteFilter || "tracked";
     const summary = next
       ? next.targetTs != null
-        ? `Next ${this._siteLabel()} launch in ${formatRelative(next.targetTs - now / 1000)} — countdown appears at T-${this._config.trigger_hours}h`
-        : `Next ${this._siteLabel()} launch: ${next.dateTarget || "date TBD"}`
-      : `No ${this._siteLabel()} launch in the next 5 tracked globally right now`;
+        ? `Next ${escapeHtml(site)} launch in ${formatRelative(next.targetTs - now / 1000)} — countdown appears at T-${this._config.trigger_hours}h`
+        : `Next ${escapeHtml(site)} launch: ${escapeHtml(next.missionName)} (date TBD)`
+      : `No ${escapeHtml(site)} launch currently tracked`;
     return `
       <ha-card>
         <div class="card-content rl-dormant">
           <ha-icon icon="mdi:rocket-outline"></ha-icon>
-          <span>${escapeHtml(summary)}</span>
+          <span>${summary}</span>
         </div>
       </ha-card>
     `;
   }
 
-  _activeHtml(launch, now) {
+  _activeHtml(launch, now, phase) {
     const delayInfo = trackDelay(launch);
-    const phase = launchPhase(launch, now);
-    const seconds = launch.targetTs - now / 1000;
-    const countdown = phase === "stale" ? "Awaiting updated status…" : formatCountdown(seconds);
-    const missionLine = launch.missions ? launch.missions.split("|").map((m) => m.trim()).filter(Boolean).join(" · ") : launch.name;
-    const urgent = phase === "window" || launch.warning20m;
+    const seconds = launch.targetTs != null ? launch.targetTs - now / 1000 : 0;
+    const countdown = phase === "stale" ? "Awaiting updated status…" : launch.targetTs == null ? "Date TBD" : formatCountdown(seconds);
+    const urgent = phase === "window" || launch.statusAbbrev === "inflight";
 
     return `
       <ha-card>
+        ${starfieldHtml()}
         <div class="card-content">
           <div class="rl-title">
             <h2>${escapeHtml(this._config.title || DEFAULT_COUNTDOWN_CONFIG.title)}</h2>
             ${urgencyBadge(launch, phase)}
           </div>
           <div class="cd-wrap ${urgent ? "imminent" : ""}">
-            <div class="cd-name">${escapeHtml(missionLine)}</div>
-            <div class="cd-meta">${escapeHtml(launch.provider)}${launch.vehicle ? ` · ${escapeHtml(launch.vehicle)}` : ""}</div>
-            <div class="cd-big ${phase === "stale" ? "cd-big-text" : ""}">${escapeHtml(countdown)}</div>
+            <div class="cd-name">${escapeHtml(launch.missionName)}</div>
+            <div class="cd-meta">${escapeHtml(launch.provider)}${launch.rocket ? ` · ${escapeHtml(launch.rocket)}` : ""}</div>
+            <div class="cd-big ${phase === "stale" || launch.targetTs == null ? "cd-big-text" : ""}">${escapeHtml(countdown)}</div>
             ${delayBadge(delayInfo)}
             <div class="cd-detail">
-              <span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.pad)}</span>
-              <span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>
-              ${launch.weatherSummary ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(launch.weatherSummary)}</span>` : ""}
+              ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
+              ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
+              ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
             </div>
           </div>
         </div>
       </ha-card>
     `;
-  }
-
-  _siteLabel() {
-    return this._config.site_filter?.trim() || "tracked";
   }
 
   _paint(html, allowEmpty) {
@@ -1158,14 +1175,14 @@ window.customCards = window.customCards || [];
   {
     type: "rocket-launch-card",
     name: "Rocket Launch Card",
-    description: "Upcoming launches filtered to your launch site, with a live countdown for near-term launches",
+    description: "Upcoming launches for one tracked site, with a live countdown for near-term launches",
     preview: true,
     documentationURL: "https://github.com/Tmatz27/ha-rocket-launch-card-",
   },
   {
     type: "rocket-launch-countdown-card",
     name: "Rocket Launch Countdown Card",
-    description: "A big live countdown that appears once the next matching launch is close",
+    description: "A big live countdown that appears once the next tracked launch is close",
     preview: true,
     documentationURL: "https://github.com/Tmatz27/ha-rocket-launch-card-",
   },

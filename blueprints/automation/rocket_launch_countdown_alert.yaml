@@ -1,11 +1,11 @@
 blueprint:
   name: Rocket Launch - Countdown Alert
   description: >
-    Sends one notification before a matching launch: normally 1 hour ahead,
-    but never later than a fallback clock time (default 8:30 PM) — so a
-    launch overnight still warns you before bed instead of waking you with a
-    1-hour-out alert at 1 AM. Checks every minute, so it can take up to a
-    minute to fire after the threshold is crossed.
+    Sends one notification before your tracked site's next launch: normally
+    1 hour ahead, but never later than a fallback clock time (default 8:30
+    PM) - so a launch overnight still warns you before bed instead of
+    waking you with a 1-hour-out alert at 1 AM. Checks every minute, so it
+    can take up to a minute to fire after the threshold is crossed.
 
     Requires a one-time helper: create an Input Text helper (Settings >
     Devices & Services > Helpers > + Create Helper > Text) to remember which
@@ -14,31 +14,16 @@ blueprint:
   domain: automation
   source_url: https://github.com/Tmatz27/ha-rocket-launch-card-/blob/main/blueprints/automation/rocket_launch_countdown_alert.yaml
   input:
-    launch_sensors:
-      name: Launch sensors
+    next_launch_entity:
+      name: Next launch sensor
       description: >
-        The harocketlaunchlive sensors to watch. Defaults to the five entities
-        the integration always creates.
+        The Rocket Launch Tracker integration's "Next Launch" sensor for
+        your site, e.g. sensor.vandenberg_next_launch.
       selector:
         entity:
-          multiple: true
           filter:
-            integration: rocketlaunchlive
-      default:
-        - sensor.rocket_launch_1
-        - sensor.rocket_launch_2
-        - sensor.rocket_launch_3
-        - sensor.rocket_launch_4
-        - sensor.rocket_launch_5
-    site_filter:
-      name: Launch site filter
-      description: >
-        Case-insensitive text matched against each launch's pad, state, and
-        country (for example "Vandenberg", "Cape Canaveral", or "CA"). Leave
-        blank to be notified about any tracked launch.
-      default: Vandenberg
-      selector:
-        text: {}
+            integration: rocket_launch_tracker
+            device_class: timestamp
     minutes_before:
       name: Minutes before launch
       description: Normal heads-up lead time, if it lands before the fallback time.
@@ -81,38 +66,30 @@ trigger:
     minutes: "/1"
 
 variables:
-  entities: !input launch_sensors
-  site_filter: !input site_filter
+  next_launch_entity: !input next_launch_entity
   minutes_before: !input minutes_before
   fallback_time: !input fallback_time
   dedup_helper: !input dedup_helper
   already_alerted: "{{ states(dedup_helper) }}"
+  raw_state: "{{ states(next_launch_entity) }}"
+  has_value: "{{ raw_state not in ['unknown', 'unavailable', 'none', ''] }}"
+  launch_dt: "{{ as_local(as_datetime(raw_state)) if has_value else None }}"
+  # Every branch collapses into flat `set` statements ending in one bare
+  # {{ dict(...) }} expression - no nested {% if %} wrapping that final
+  # expression - so the rendered template is a single native value with no
+  # stray indentation/whitespace around it. A dict template with leading
+  # whitespace (e.g. from an indented {{ }} inside an {% if %} block) can
+  # fail to come back as a real dict, which would break `computed.fire`
+  # below, so this shape is deliberate, not just a style choice.
   computed: |-
-    {% set site = site_filter | lower %}
+    {% set still_ahead = has_value and launch_dt > now() %}
+    {% set candidate_dt = (launch_dt - timedelta(minutes=minutes_before | int)) if still_ahead else None %}
     {% set fallback_dt = today_at(fallback_time) %}
-    {% set ns = namespace(fire=false, key='', name='', provider='', minutes_left=0) %}
-    {% for eid in entities %}
-      {% set pad = state_attr(eid, 'launch_pad') %}
-      {% if pad and (site == '' or site in (pad | lower) or site in (state_attr(eid, 'launch_US_state') | default('', true) | lower) or site in (state_attr(eid, 'launch_location') | default('', true) | lower)) %}
-        {% set ts = state_attr(eid, 'launch_target_timestamp') %}
-        {% if ts not in [none, ''] %}
-          {% set launch_dt = as_local(as_datetime(ts | int)) %}
-          {% if launch_dt > now() %}
-            {% set candidate_dt = launch_dt - timedelta(minutes=minutes_before | int) %}
-            {% set alert_dt = [candidate_dt, fallback_dt] | min %}
-            {% set key = eid ~ '|' ~ (ts | string) %}
-            {% if now() >= alert_dt and key != already_alerted and not ns.fire %}
-              {% set ns.fire = true %}
-              {% set ns.key = key %}
-              {% set ns.name = state_attr(eid, 'name') | default('Unknown launch', true) %}
-              {% set ns.provider = state_attr(eid, 'provider') | default('', true) %}
-              {% set ns.minutes_left = ((launch_dt - now()).total_seconds() / 60) | round(0, 'floor') | int %}
-            {% endif %}
-          {% endif %}
-        {% endif %}
-      {% endif %}
-    {% endfor %}
-    {{ dict(fire=ns.fire, key=ns.key, name=ns.name, provider=ns.provider, minutes_left=ns.minutes_left) }}
+    {% set alert_dt = ([candidate_dt, fallback_dt] | min) if candidate_dt is not none else None %}
+    {% set key = (next_launch_entity ~ '|' ~ raw_state) if still_ahead else '' %}
+    {% set should_fire = still_ahead and alert_dt is not none and now() >= alert_dt and key != already_alerted %}
+    {% set minutes_left = (((launch_dt - now()).total_seconds() / 60) | round(0, 'floor') | int) if should_fire else 0 %}
+    {{ dict(fire=should_fire, key=(key if should_fire else ''), minutes_left=minutes_left) }}
 
 condition:
   - condition: template
@@ -123,7 +100,8 @@ action:
     data:
       title: "🚀 Launch countdown"
       message: >-
-        {{ computed.name }} ({{ computed.provider }}) — about
+        {{ state_attr(next_launch_entity, 'name') }}
+        ({{ state_attr(next_launch_entity, 'provider') }}) — about
         {{ computed.minutes_left }} min to go.
   - action: input_text.set_value
     target:

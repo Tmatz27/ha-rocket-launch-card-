@@ -114,42 +114,53 @@ test("announces both cards to the dashboard picker", () => {
 });
 
 // --- fixtures ---------------------------------------------------------
+// Shape matches what the ha-rocket-launch-tracker integration's api.py
+// parse_launch() produces, which is what ends up in the "Upcoming Launches"
+// sensor's `launches` attribute.
 
-function makeLaunchState({
-  name = "Starlink 12-3",
+function makeRawLaunch({
+  id = "abc-123",
+  name = "Falcon 9 Block 5 | Starlink Group 12-3",
+  missionName = "Starlink Group 12-3",
   provider = "SpaceX",
-  vehicle = "Falcon 9",
-  pad = "Vandenberg SFB (SLC-4E)",
-  usState = "CA",
-  country = "USA",
-  targetTs = null,
-  dateTarget = "",
-  estDate = "NA",
-  warning20m = "false",
-  warning24h = "false",
-  lastUpdated,
+  rocket = "Falcon 9",
+  padName = "Space Launch Complex 4E",
+  locationName = "Vandenberg SFB, CA, USA",
+  status = "Go for Launch",
+  statusAbbrev = "Go",
+  net = null,
+  windowStart = null,
+  netPrecision = null,
+  probability = null,
+  description = "",
 } = {}) {
   return {
-    state: `${name} (${provider})`,
-    attributes: {
-      name,
-      provider,
-      vehicle,
-      launch_pad: pad,
-      launch_US_state: usState,
-      launch_location: country,
-      launch_target_timestamp: targetTs === null ? "" : targetTs,
-      launch_target: targetTs === null ? "NA" : "some formatted string",
-      launch_date_target: dateTarget,
-      est_launch_date: estDate,
-      launch_20m_warning: warning20m,
-      launch_24h_warning: warning24h,
-      launch_missions: "",
-      launch_description: "",
-      tags: "",
-      weather_summary: "",
-      weather_temp: "",
-    },
+    id,
+    name,
+    mission_name: missionName,
+    mission_description: description,
+    status,
+    status_abbrev: statusAbbrev,
+    provider,
+    rocket,
+    pad_name: padName,
+    location_name: locationName,
+    net,
+    window_start: windowStart,
+    window_end: null,
+    net_precision: netPrecision,
+    probability,
+    image: "",
+    webcast_live: false,
+    hold_reason: "",
+    fail_reason: "",
+  };
+}
+
+function makeUpcomingState(launches, { siteFilter = "Vandenberg", lastUpdated } = {}) {
+  return {
+    state: String(launches.length),
+    attributes: { site_filter: siteFilter, launches },
     last_updated: lastUpdated || new Date().toISOString(),
   };
 }
@@ -161,90 +172,97 @@ function render(card, config, hass) {
   return card._root.innerHTML;
 }
 
+const ENTITY_ID = "sensor.vandenberg_upcoming_launches";
+
 // --- rocket-launch-card -------------------------------------------------
 
-test("main card shows a matching near-term launch with a live countdown", () => {
-  const nowSec = Date.now() / 1000;
+test("main card shows a near-term launch with a live countdown", () => {
+  const nowIso = new Date(Date.now() + 3600 * 1000).toISOString();
   const hass = {
     states: {
-      "sensor.rocket_launch_1": makeLaunchState({ targetTs: Math.round(nowSec + 3600) }),
-      "sensor.rocket_launch_2": makeLaunchState({
-        name: "Some Other Mission",
-        provider: "ULA",
-        pad: "Cape Canaveral SFS (SLC-41)",
-        usState: "FL",
-        targetTs: Math.round(nowSec + 7200),
-      }),
+      [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: nowIso })]),
     },
   };
-  const html = render(new Card(), { site_filter: "Vandenberg", live_window_hours: 24 }, hass);
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
 
-  assert.match(html, /class="hero/, "near-term matching launch should render as a hero card");
-  assert.match(html, /Starlink 12-3/);
-  assert.match(html, /Vandenberg SFB/);
-  assert.doesNotMatch(html, /Some Other Mission/, "non-matching launch should be hidden by default");
+  assert.match(html, /class="hero/, "near-term launch should render as a hero card");
+  assert.match(html, /Starlink Group 12-3/);
+  assert.match(html, /Space Launch Complex 4E/);
+  assert.match(html, /Go for Launch/);
   assert.match(html, /\d{2}:\d{2}:\d{2}/, "hero card should show a ticking countdown");
 });
 
-test("main card shows a far-out matching launch as a compact row, not a hero", () => {
-  const nowSec = Date.now() / 1000;
-  const hass = {
-    states: {
-      "sensor.rocket_launch_1": makeLaunchState({ targetTs: Math.round(nowSec + 96 * 3600) }),
-    },
-  };
-  const html = render(new Card(), { site_filter: "Vandenberg", live_window_hours: 24 }, hass);
+test("main card shows a far-out launch as a compact row, not a hero", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso })]) } };
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
 
   assert.doesNotMatch(html, /class="hero/);
   assert.match(html, /rl-row/);
-  assert.match(html, /Starlink 12-3/);
+  assert.match(html, /Starlink Group 12-3/);
 });
 
-test("main card shows a NET date-only launch without a fake countdown", () => {
+test("main card shows a NET/date-only launch without a fake countdown", () => {
   const hass = {
     states: {
-      "sensor.rocket_launch_1": makeLaunchState({ targetTs: null, dateTarget: "NET September 14, 2026" }),
+      [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: null, netPrecision: "Month" })]),
     },
   };
-  const html = render(new Card(), { site_filter: "Vandenberg" }, hass);
+  const html = render(new Card(), { entity: ENTITY_ID }, hass);
 
-  assert.match(html, /NET September 14, 2026/);
+  assert.match(html, /Month precision/);
   assert.doesNotMatch(html, /class="hero/, "a launch with no known time should never render as a live countdown");
 });
 
-test("main card shows a friendly empty state when nothing matches the site filter", () => {
-  const nowSec = Date.now() / 1000;
+test("main card always shows an In Flight launch as a hero, regardless of window", () => {
+  const pastIso = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
   const hass = {
     states: {
-      "sensor.rocket_launch_1": makeLaunchState({
-        name: "Some Other Mission",
-        pad: "Cape Canaveral SFS (SLC-41)",
-        usState: "FL",
-        targetTs: Math.round(nowSec + 3600),
-      }),
+      [ENTITY_ID]: makeUpcomingState([
+        makeRawLaunch({ net: pastIso, status: "In Flight", statusAbbrev: "InFlight" }),
+      ]),
     },
   };
-  const html = render(new Card(), { site_filter: "Vandenberg" }, hass);
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 1 }, hass);
 
-  assert.match(html, /No Vandenberg launches/);
+  assert.match(html, /class="hero/);
+  assert.match(html, /In Flight/);
 });
 
-test("main card reports when no Rocket Launch Live sensors exist at all", () => {
-  const html = render(new Card(), { site_filter: "Vandenberg" }, { states: {} });
-  assert.match(html, /No Rocket Launch Live sensors found/);
+test("main card shows a friendly empty state when nothing is tracked", () => {
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([], { siteFilter: "Vandenberg" }) } };
+  const html = render(new Card(), { entity: ENTITY_ID }, hass);
+
+  assert.match(html, /No upcoming launches tracked/);
+  assert.match(html, /Vandenberg/);
+});
+
+test("main card asks for a sensor when none is configured", () => {
+  const html = render(new Card(), { entity: "" }, { states: {} });
+  assert.match(html, /No sensor selected/);
+});
+
+test("main card reports when the configured entity doesn't exist", () => {
+  const html = render(new Card(), { entity: ENTITY_ID }, { states: {} });
+  assert.match(html, /Sensor not found/);
 });
 
 test("main card flags a launch that has slipped later than first observed", () => {
   const card = new Card();
-  const baseSec = Math.round(Date.now() / 1000) + 3600;
-  const launch = makeLaunchState({ targetTs: baseSec });
+  const baseMs = Date.now() + 3600 * 1000;
 
-  render(card, { site_filter: "Vandenberg" }, { states: { "sensor.rocket_launch_1": launch } });
+  render(card, { entity: ENTITY_ID }, {
+    states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ id: "same-id", net: new Date(baseMs).toISOString() })]) },
+  });
 
-  // Same mission identity (name/provider/pad), later target time - simulates
-  // the next poll picking up a delay.
-  const delayed = makeLaunchState({ targetTs: baseSec + 3600 });
-  const html = render(card, { site_filter: "Vandenberg" }, { states: { "sensor.rocket_launch_1": delayed } });
+  // Same launch id, later net time - simulates the next poll picking up a delay.
+  const html = render(card, { entity: ENTITY_ID }, {
+    states: {
+      [ENTITY_ID]: makeUpcomingState([
+        makeRawLaunch({ id: "same-id", net: new Date(baseMs + 3600 * 1000).toISOString() }),
+      ]),
+    },
+  });
 
   assert.match(html, /Slipped from/);
 });
@@ -252,64 +270,60 @@ test("main card flags a launch that has slipped later than first observed", () =
 // --- rocket-launch-countdown-card ---------------------------------------
 
 test("countdown card stays compact/dormant outside the trigger window", () => {
-  const nowSec = Date.now() / 1000;
-  const hass = {
-    states: {
-      "sensor.rocket_launch_1": makeLaunchState({ targetTs: Math.round(nowSec + 5 * 3600) }),
-    },
-  };
-  const html = render(new CountdownCard(), { site_filter: "Vandenberg", trigger_hours: 2 }, hass);
+  const farIso = new Date(Date.now() + 5 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso })]) } };
+  const html = render(new CountdownCard(), { entity: ENTITY_ID, trigger_hours: 2 }, hass);
 
   assert.match(html, /rl-dormant/);
   assert.doesNotMatch(html, /cd-big/);
 });
 
 test("countdown card goes active with a big countdown inside the trigger window", () => {
-  const nowSec = Date.now() / 1000;
-  const hass = {
-    states: {
-      "sensor.rocket_launch_1": makeLaunchState({ targetTs: Math.round(nowSec + 1800) }),
-    },
-  };
-  const html = render(new CountdownCard(), { site_filter: "Vandenberg", trigger_hours: 2 }, hass);
+  const soonIso = new Date(Date.now() + 1800 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: soonIso })]) } };
+  const html = render(new CountdownCard(), { entity: ENTITY_ID, trigger_hours: 2 }, hass);
 
   assert.match(html, /cd-big/);
   assert.doesNotMatch(html, /rl-dormant/);
 });
 
 test("countdown card collapses to nothing when show_when_inactive is false", () => {
-  const nowSec = Date.now() / 1000;
-  const hass = {
-    states: {
-      "sensor.rocket_launch_1": makeLaunchState({ targetTs: Math.round(nowSec + 5 * 3600) }),
-    },
-  };
+  const farIso = new Date(Date.now() + 5 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso })]) } };
   const card = new CountdownCard();
-  render(card, { site_filter: "Vandenberg", trigger_hours: 2, show_when_inactive: false }, hass);
+  render(card, { entity: ENTITY_ID, trigger_hours: 2, show_when_inactive: false }, hass);
 
   assert.equal(card.style.display, "none");
 });
 
 test("countdown card shows an unconfirmed-status message instead of a runaway timer", () => {
-  const nowSec = Date.now() / 1000;
-  const hass = {
-    states: {
-      // 20 minutes past the predicted target with no updated timestamp.
-      "sensor.rocket_launch_1": makeLaunchState({ targetTs: Math.round(nowSec - 20 * 60) }),
-    },
-  };
-  const html = render(new CountdownCard(), { site_filter: "Vandenberg", trigger_hours: 2 }, hass);
+  // 20 minutes past the predicted target with no updated timestamp.
+  const overdueIso = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: overdueIso })]) } };
+  const html = render(new CountdownCard(), { entity: ENTITY_ID, trigger_hours: 2 }, hass);
 
   assert.match(html, /Awaiting updated status/);
+});
+
+test("countdown card goes active for a Hold launch even outside the trigger window", () => {
+  const farIso = new Date(Date.now() + 10 * 3600 * 1000).toISOString();
+  const hass = {
+    states: {
+      [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso, status: "Hold", statusAbbrev: "Hold" })]),
+    },
+  };
+  const html = render(new CountdownCard(), { entity: ENTITY_ID, trigger_hours: 2 }, hass);
+
+  assert.match(html, /cd-big/);
 });
 
 // --- editors --------------------------------------------------------------
 
 test("main card editor renders without throwing and reports config changes", () => {
   const editor = new CardEditor();
-  editor.setConfig({ site_filter: "Vandenberg" });
+  editor.setConfig({ entity: ENTITY_ID });
   editor.connectedCallback();
-  assert.match(editor.shadowRoot.innerHTML, /Site filter/);
+  assert.match(editor.shadowRoot.innerHTML, /Upcoming launches sensor/);
 
   let detail = null;
   editor.addEventListener = (type, handler) => {
@@ -318,8 +332,8 @@ test("main card editor renders without throwing and reports config changes", () 
   editor.dispatchEvent = (event) => {
     detail = event.detail;
   };
-  editor._update("site_filter", "Cape Canaveral");
-  assert.equal(detail.config.site_filter, "Cape Canaveral");
+  editor._update("live_window_hours", 12);
+  assert.equal(detail.config.live_window_hours, 12);
 });
 
 test("countdown card editor renders without throwing", () => {

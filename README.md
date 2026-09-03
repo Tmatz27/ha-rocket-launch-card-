@@ -4,51 +4,54 @@
 
 > The banner above is an illustration of the card's layout, not a screenshot.
 
-Modern Home Assistant Lovelace cards and automation blueprints for
+Modern Home Assistant Lovelace cards and automation blueprints, built to
+answer one question fast: **is there a launch from my site coming up, and
+how long until it goes?**
+
+This is the frontend half of a two-repo project:
+
+- **[Tmatz27/ha-rocket-launch-tracker](https://github.com/Tmatz27/ha-rocket-launch-tracker)**
+  — a small custom integration that polls
+  [Launch Library 2](https://ll.thespacedevs.com) (thespacedevs.com), filtered
+  **server-side** to whatever launch site you configure, and exposes it as
+  Home Assistant sensors. Install this first — the cards below read its
+  entities.
+- **This repo** — the two Lovelace cards and two automation blueprints that
+  consume those sensors.
+
+### Why two repos, and why not the other rocketlaunch.live integration
+
+An earlier version of this project read
 [djtimca/harocketlaunchlive](https://github.com/djtimca/harocketlaunchlive)
-(Rocket Launch Live), built to answer one question fast: **is there a launch
-from my site coming up, and how long until it goes?**
+instead. That integration always exposes exactly the **next 5 launches
+worldwide**, with no per-site filter of its own — if 5 launches from other
+sites were queued up before the next one from yours, it simply wasn't in the
+data yet, and no amount of client-side filtering could show it. It also
+doesn't expose an explicit Go/Hold/Scrub status field, only raw target times.
 
-## Why this exists
+`ha-rocket-launch-tracker` exists to fix both of those: filtering happens at
+the data source (Launch Library 2 supports it directly), and each launch
+carries a real status (Go, TBD, Hold, Success, Failure, In Flight) instead of
+one inferred purely from timing.
 
-The upstream integration's own example card (a static `button-card` grid)
-just prints five fixed fields per sensor. It doesn't filter by launch site,
-doesn't tick down live, and shows the same flat text whether a launch is
-scrubbed, delayed, or minutes away. This project replaces it with:
+## What's here
 
-- **`rocket-launch-card`** — an upcoming-launches list filtered to your
-  launch site (defaults to Vandenberg SFB), with a live ticking countdown for
-  near-term launches and a compact line for everything farther out
+- **`rocket-launch-card`** — an upcoming-launches list for your tracked site,
+  with a live ticking countdown for near-term launches and a compact line for
+  everything farther out
 - **`rocket-launch-countdown-card`** — a dedicated countdown that stays out
-  of the way until the next matching launch is close, then takes over with a
-  big live timer
+  of the way until the next launch is close, then takes over with a big live
+  timer
 - Two **automation blueprints** — a daily "launch today" alert, and a
   countdown alert capped at a fallback time so an overnight launch still
   warns you before bed
-
-### A real limit of the upstream integration
-
-`harocketlaunchlive` always creates exactly five sensors —
-`sensor.rocket_launch_1` through `_5` — holding the **next five launches
-worldwide**, in order. There is no per-site filter and no config option to
-track more of them. These cards filter *within* those five for your site,
-but if five other launches are queued up before the next one from your site,
-it genuinely will not appear yet — the data isn't there to show. When that
-happens the card says so explicitly rather than showing nothing or stale
-data.
-
-The integration also doesn't expose an explicit Go/Hold/Scrub status field —
-only target times. "Delayed" and "in launch window" states below are
-inferred client-side from how those times change and from how far past a
-predicted time we are, not read from a status flag.
 
 ## Requirements
 
 1. Home Assistant 2024.10 or newer
 2. HACS
-3. [Rocket Launch Live](https://github.com/djtimca/harocketlaunchlive)
-   integration installed and configured (a free rocketlaunch.live API key is
-   enough; a paid key adds featured video links)
+3. [Rocket Launch Tracker](https://github.com/Tmatz27/ha-rocket-launch-tracker)
+   installed and set up for your site first
 
 ## Install with HACS
 
@@ -67,14 +70,19 @@ dashboards need that resource added by hand in `configuration.yaml`.
 
 ## Add the cards
 
+Both cards need exactly one thing: the tracker integration's **Upcoming
+Launches** sensor for your site (e.g. `sensor.vandenberg_upcoming_launches`
+— check **Settings → Devices & Services → Rocket Launch Tracker** for the
+exact entity id, or just use the visual editor's entity picker).
+
 ```yaml
 type: custom:rocket-launch-card
-site_filter: Vandenberg
+entity: sensor.vandenberg_upcoming_launches
 ```
 
 ```yaml
 type: custom:rocket-launch-countdown-card
-site_filter: Vandenberg
+entity: sensor.vandenberg_upcoming_launches
 trigger_hours: 2
 ```
 
@@ -86,54 +94,53 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
 | Option | Default | Description |
 | --- | --- | --- |
 | `title` | `Rocket Launches` | Card heading |
-| `site_filter` | `Vandenberg` | Case-insensitive text matched against each launch's pad, state, and country. Blank shows every tracked launch |
+| `entity` | *(required)* | The tracker integration's "Upcoming Launches" sensor |
 | `live_window_hours` | `24` | Launches inside this window get the big live countdown; farther out shows as a simple line |
-| `show_other_launches` | `false` | Also list the tracked launches that don't match `site_filter`, in a secondary compact section |
-| `show_weather` | `true` | Show the pad weather summary when available |
 | `show_description` | `true` | Show the mission description on the live countdown card |
-| `entity_prefix` | `sensor.rocket_launch_` | YAML-only. Change if you renamed the integration's entities |
 
 ### `rocket-launch-countdown-card` options
 
 | Option | Default | Description |
 | --- | --- | --- |
 | `title` | `Launch Countdown` | Card heading |
-| `site_filter` | `Vandenberg` | Same matching as the main card |
+| `entity` | *(required)* | Same sensor as the main card — the countdown tracks whichever launch is first in its list |
 | `trigger_hours` | `2` | The countdown takes over this many hours before launch |
 | `show_when_inactive` | `true` | When outside the window, show a one-line "next launch in..." summary instead of collapsing to nothing |
-| `entity_prefix` | `sensor.rocket_launch_` | YAML-only |
 
 ## How the live behavior works
 
-- **Live countdown**: once a matching launch has a known target time and is
+- **Live countdown**: once the next launch has a known target time and is
   inside `live_window_hours` (main card) or `trigger_hours` (countdown
   card), the timer ticks every second, client-side, between the
-  integration's ~60-second polls.
+  integration's own adaptive polling (as often as every few minutes once a
+  launch is close — see the tracker repo's README for exactly how that's
+  paced against Launch Library's rate limit).
+- **Real status, not just timing**: a launch carries an actual status —
+  Go, TBD, Hold, Success, Failure, In Flight — shown as the badge. A Hold or
+  an In-Flight launch stays prominent regardless of the configured window.
 - **Delayed launches**: each card remembers the first target time it saw for
-  a given mission (by name + provider + pad, in your browser's
-  `localStorage` — not tied to the sensor index, since the integration
-  reassigns `_1`.._5` to whatever is soonest). If a later poll reports a
-  later time for the same mission, a **"Slipped from ..."** badge appears
-  until that mission clears the tracked five.
-- **Past the predicted time**: for up to 15 minutes past a launch's target
-  time, the card shows "in launch window" and counts up. Past that, it stops
-  guessing and shows **"Awaiting updated status"** instead of a runaway or
-  frozen timer, since the data is almost certainly about to change (either a
-  new target time, or the mission drops off the tracked five).
-- **No known time yet**: a launch with only a NET date (no `t0`/window-open
-  time from the API) shows that date as text — never a fake countdown.
+  a given launch (by Launch Library's own launch id, in your browser's
+  `localStorage`). If a later poll reports a later time for the same launch,
+  a **"Slipped from ..."** badge appears until that launch is no longer
+  tracked.
+- **Past the predicted time with no status update yet**: for up to 15
+  minutes, the card shows "in launch window" and counts up. Past that, it
+  shows **"Awaiting updated status"** instead of a runaway or frozen timer.
+- **No known time yet**: a launch with only a rough precision (e.g. "Month")
+  and no exact date shows that as text — never a fake countdown.
 
 ## Automation blueprints
 
 Both live in [`blueprints/automation/`](blueprints/automation) and read the
-same five sensors. Import with the buttons below (they open your own Home
-Assistant), or **Settings → Automations & Scenes → Blueprints → Import
-Blueprint** and paste the raw GitHub URL.
+tracker's **Next Launch** sensor (a timestamp entity — `sensor.<site>_next_launch`).
+Import with the buttons below (they open your own Home Assistant), or
+**Settings → Automations & Scenes → Blueprints → Import Blueprint** and paste
+the raw GitHub URL.
 
 ### Launch day alert
 
-Checks once a day and sends one notification if a matching launch is
-scheduled for today, naming the mission and its time.
+Checks once a day and sends one notification if a launch is scheduled for
+today, naming it and its time.
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FTmatz27%2Fha-rocket-launch-card-%2Fmain%2Fblueprints%2Fautomation%2Frocket_launch_day_alert.yaml)
 
@@ -178,8 +185,9 @@ No build step. `rocket-launch-card.js` is the HACS release file.
 
 ## Credits
 
-Data comes from [rocketlaunch.live](https://rocketlaunch.live) via
-[djtimca/harocketlaunchlive](https://github.com/djtimca/harocketlaunchlive).
+Data comes from [Launch Library 2](https://ll.thespacedevs.com)
+(thespacedevs.com) via
+[Tmatz27/ha-rocket-launch-tracker](https://github.com/Tmatz27/ha-rocket-launch-tracker).
 Card structure and interaction patterns follow the same conventions as
 [Tmatz27/ha-sab-deluge-card](https://github.com/Tmatz27/ha-sab-deluge-card).
 
