@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.6
+
+- **Fixed confusing T-minus math**: the T-minus line truncated to whole
+  days (or whole hours) and threw away the remainder, so a launch 1 day 18
+  hours out showed as a flat "T- 1 day" - indistinguishable from one that
+  was genuinely only a day away. It now shows the remainder too ("T- 1d
+  18h"), same for the sub-day hours/minutes case
+- The landing badge's fallback text ("Landing attempt planned") didn't say
+  where, which was confusing when every row showed it with no way to tell
+  a return-to-launch-site landing from a drone-ship one. Turned out to be
+  two things: **a real bug** in the tracker integration (see
+  [ha-rocket-launch-tracker 0.1.4](https://github.com/Tmatz27/ha-rocket-launch-tracker) -
+  it was reading the wrong JSON field and the location was always empty),
+  now fixed there; and for the genuine case where Launch Library hasn't
+  assigned a specific pad/drone ship yet, the badge now says "Landing
+  planned, site TBD" instead of leaving you to guess why
+
 ## 0.2.5
 
 - Removed the large background rocket-icon watermark added in 0.2.4 - it was

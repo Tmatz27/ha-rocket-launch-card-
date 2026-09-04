@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.2.5
+ * Version 0.2.6
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,7 +24,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.2.5";
+const ROCKET_LAUNCH_CARD_VERSION = "0.2.6";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
@@ -299,13 +299,16 @@ function rowClockText(launch) {
 // "T- 14 days" style relative countdown shown beneath the formatted date.
 // Below a day out this hands off to the same live HH:MM:SS ticker the
 // hero/countdown cards use, since a static "T- 1 day" wouldn't tick.
+// Always includes the remainder unit (18h of a 1-day wait, 45m of a 6-hour
+// one) rather than truncating it away - "T- 1 day" alone reads as "about a
+// day" when it could be anywhere from 24 to 47 hours out.
 function formatTMinus(seconds) {
   const s = Math.max(0, Math.round(seconds));
   const days = Math.floor(s / 86400);
   const hours = Math.floor((s % 86400) / 3600);
   const minutes = Math.floor((s % 3600) / 60);
-  if (days > 0) return `T- ${days} day${days === 1 ? "" : "s"}`;
-  if (hours > 0) return `T- ${hours} hour${hours === 1 ? "" : "s"}`;
+  if (days > 0) return hours > 0 ? `T- ${days}d ${hours}h` : `T- ${days} day${days === 1 ? "" : "s"}`;
+  if (hours > 0) return minutes > 0 ? `T- ${hours}h ${minutes}m` : `T- ${hours} hour${hours === 1 ? "" : "s"}`;
   return `T- ${Math.max(1, minutes)} min${minutes === 1 ? "" : "s"}`;
 }
 
@@ -815,7 +818,7 @@ function landingBadgeHtml(launch) {
   if (isRtlsLanding(launch.landingLocation)) {
     return `<span class="rl-badge rtls-warning"><ha-icon icon="mdi:alert"></ha-icon>⚠️ RTLS Landing: Sonic Boom Expected</span>`;
   }
-  const label = launch.landingLocation ? `Landing: ${launch.landingLocation}` : "Landing attempt planned";
+  const label = launch.landingLocation ? `Landing: ${launch.landingLocation}` : "Landing planned, site TBD";
   return `<span class="rl-badge neutral small"><ha-icon icon="mdi:ferry"></ha-icon>${escapeHtml(label)}</span>`;
 }
 

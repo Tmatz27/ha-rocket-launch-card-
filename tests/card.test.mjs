@@ -386,6 +386,16 @@ test("compact row shows a T-minus line beneath the formatted date", () => {
   assert.match(html, /T- 1[34] days?/, "a relative T-minus line should appear beneath it");
 });
 
+test("T-minus shows the hours remainder instead of truncating it away", () => {
+  // 1 day 18 hours out - truncating to whole days would misleadingly print
+  // "T- 1 day" for something that's actually most of the way to 2 days.
+  const target = new Date(Date.now() + (1 * 24 + 18) * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: target })]) } };
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  assert.match(html, /T- 1d 18h/);
+});
+
 test("compact row's T-minus line switches to hours inside a day", () => {
   const soonIso = new Date(Date.now() + 5 * 3600 * 1000).toISOString();
   const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: soonIso })]) } };

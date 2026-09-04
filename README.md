@@ -53,9 +53,10 @@ one inferred purely from timing.
 1. Home Assistant 2024.10 or newer
 2. HACS
 3. [Rocket Launch Tracker](https://github.com/Tmatz27/ha-rocket-launch-tracker)
-   installed and set up for your site first — **v0.1.3 or newer** if you want
-   target orbit and booster landing/RTLS status; older versions still work,
-   the card just won't have that data to show
+   installed and set up for your site first — **v0.1.4 or newer** if you want
+   target orbit and booster landing/RTLS status (0.1.3 forwarded the data but
+   had the landing *location* field wrong - always empty); older versions
+   still work, the card just won't have that data to show
 
 ## Install with HACS
 
@@ -127,10 +128,12 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
   Hold or an In-Flight launch stays prominent regardless of the configured
   window. The launch provider gets its own neutral pill badge next to it.
 - **T-minus line, color-coded by proximity**: a compact row shows the
-  formatted date and, beneath it, a relative "T- 14 days" line. That second
-  line is muted gray beyond 30 days out, warning yellow/orange inside 7
-  days, and switches to a bold live countdown once inside 24 hours — even if
-  that row isn't the hero card.
+  formatted date and, beneath it, a relative "T- 14 days" line (with the
+  hours remainder shown too once it's under 2 days, e.g. "T- 1d 18h", so it
+  never reads as "about a day" for something up to 47 hours out). That
+  second line is muted gray beyond 30 days out, warning yellow/orange
+  inside 7 days, and switches to a bold live countdown once inside 24
+  hours — even if that row isn't the hero card.
 - **Click a row for more detail**: any launch row (hero or compact) expands
   in place to show target orbit, rocket, booster landing status, and the
   mission description, without opening Home Assistant's more-info dialog.
@@ -142,9 +145,11 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
   "Vandenberg" in the location name), which instead gets an aggressive solid
   red "⚠️ RTLS Landing: Sonic Boom Expected" badge, since that means an
   audible sonic boom near the site. A launch known not to attempt a landing
-  shows "Expendable" instead. Requires Rocket Launch Tracker v0.1.3+;
-  older tracker versions simply won't have this data to show, and the badge
-  is silently omitted rather than guessing.
+  shows "Expendable" instead, and one Launch Library just hasn't assigned a
+  specific pad or drone ship to yet shows "Landing planned, site TBD".
+  Requires Rocket Launch Tracker v0.1.4+; older tracker versions simply
+  won't have this data to show, and the badge is silently omitted rather
+  than guessing.
 - **Delayed launches**: each card remembers the first target time it saw for
   a given launch (by Launch Library's own launch id, in your browser's
   `localStorage`). If a later poll reports a later time for the same launch,
