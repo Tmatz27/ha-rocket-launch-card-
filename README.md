@@ -99,6 +99,7 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
 | `entity` | *(required)* | The tracker integration's "Upcoming Launches" sensor |
 | `live_window_hours` | `24` | Launches inside this window get the big live countdown; farther out shows as a simple line |
 | `show_description` | `true` | Show the mission description on the live countdown card |
+| `max_launches` | `0` | Caps how many launches the list shows. `0` shows every launch the sensor provides |
 
 ### `rocket-launch-countdown-card` options
 
@@ -118,8 +119,15 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
   launch is close — see the tracker repo's README for exactly how that's
   paced against Launch Library's rate limit).
 - **Real status, not just timing**: a launch carries an actual status —
-  Go, TBD, Hold, Success, Failure, In Flight — shown as the badge. A Hold or
-  an In-Flight launch stays prominent regardless of the configured window.
+  Go, TBD, Hold, Success, Failure, In Flight — shown as a pill badge, and
+  echoed in a 6px left accent bar on every row (green for Go/Success, red
+  for Hold/Failure, blue/gray for TBD or an ordinary scheduled launch). A
+  Hold or an In-Flight launch stays prominent regardless of the configured
+  window. The launch provider gets its own neutral pill badge next to it.
+- **Date color shifts as launch day approaches**: a compact row's date is
+  muted gray beyond 30 days out, a warning yellow/orange inside 7 days, and
+  swaps to a bold live countdown once inside 24 hours — even if that row
+  isn't the hero card.
 - **Delayed launches**: each card remembers the first target time it saw for
   a given launch (by Launch Library's own launch id, in your browser's
   `localStorage`). If a later poll reports a later time for the same launch,

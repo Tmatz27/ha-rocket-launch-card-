@@ -267,6 +267,114 @@ test("main card flags a launch that has slipped later than first observed", () =
   assert.match(html, /Slipped from/);
 });
 
+test("max_launches caps how many launches the main card renders", () => {
+  const launches = [0, 1, 2].map((i) =>
+    makeRawLaunch({
+      id: `launch-${i}`,
+      missionName: `Mission ${i}`,
+      net: new Date(Date.now() + (96 + i * 24) * 3600 * 1000).toISOString(),
+    }),
+  );
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState(launches) } };
+  const html = render(new Card(), { entity: ENTITY_ID, max_launches: 1 }, hass);
+
+  assert.match(html, /Mission 0/);
+  assert.doesNotMatch(html, /Mission 1/);
+  assert.doesNotMatch(html, /Mission 2/);
+});
+
+test("max_launches of 0 (default) shows every launch the sensor provides", () => {
+  const launches = [0, 1, 2].map((i) =>
+    makeRawLaunch({
+      id: `launch-${i}`,
+      missionName: `Mission ${i}`,
+      net: new Date(Date.now() + (96 + i * 24) * 3600 * 1000).toISOString(),
+    }),
+  );
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState(launches) } };
+  const html = render(new Card(), { entity: ENTITY_ID }, hass);
+
+  assert.match(html, /Mission 0/);
+  assert.match(html, /Mission 1/);
+  assert.match(html, /Mission 2/);
+});
+
+test("Hold status renders with the hot (red) tone, not the old warning tone", () => {
+  const farIso = new Date(Date.now() + 10 * 3600 * 1000).toISOString();
+  const hass = {
+    states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso, status: "Hold", statusAbbrev: "Hold" })]) },
+  };
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  assert.match(html, /rl-badge hot/);
+});
+
+test("Go status renders with the good (green) tone", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const hass = {
+    states: {
+      [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso, status: "Go for Launch", statusAbbrev: "Go" })]),
+    },
+  };
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  assert.match(html, /--rl-tone: var\(--rl-good\)/);
+});
+
+test("provider renders as a neutral pill badge, not plain text", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso, provider: "SpaceX" })]) } };
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  assert.match(html, /rl-badge neutral small/);
+  assert.match(html, />SpaceX</);
+});
+
+test("card-level watermark reflects the next launch's tone and appears exactly once", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso })]) } };
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  const matches = html.match(/rl-watermark"/g) || [];
+  assert.equal(matches.length, 1, "exactly one card-level watermark should render");
+});
+
+test("compact row shows a live countdown and the imminent tier inside 24 hours", () => {
+  const soonIso = new Date(Date.now() + 5 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: soonIso })]) } };
+  // live_window_hours below 24 keeps this a compact row despite being <24h out.
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 1 }, hass);
+
+  assert.doesNotMatch(html, /class="hero/);
+  assert.match(html, /rl-tier-imminent/);
+  assert.match(html, /\d{2}:\d{2}:\d{2}/, "imminent compact row should show a live countdown, not a static clock");
+});
+
+test("compact row uses the warning tier inside 7 days", () => {
+  const soonIso = new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: soonIso })]) } };
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  assert.doesNotMatch(html, /class="hero/);
+  assert.match(html, /rl-tier-soon/);
+});
+
+test("compact row uses the normal tier between 7 and 30 days", () => {
+  const midIso = new Date(Date.now() + 15 * 24 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: midIso })]) } };
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  assert.match(html, /rl-tier-normal/);
+});
+
+test("compact row uses the muted far tier beyond 30 days", () => {
+  const farIso = new Date(Date.now() + 45 * 24 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso })]) } };
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  assert.match(html, /rl-tier-far/);
+});
+
 // --- rocket-launch-countdown-card ---------------------------------------
 
 test("countdown card stays compact/dormant outside the trigger window", () => {
@@ -317,6 +425,19 @@ test("countdown card goes active for a Hold launch even outside the trigger wind
   assert.match(html, /cd-big/);
 });
 
+test("countdown card shows the provider as a pill badge and one tone-matched watermark", () => {
+  const soonIso = new Date(Date.now() + 1800 * 1000).toISOString();
+  const hass = {
+    states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: soonIso, provider: "SpaceX" })]) },
+  };
+  const html = render(new CountdownCard(), { entity: ENTITY_ID, trigger_hours: 2 }, hass);
+
+  assert.match(html, /rl-badge neutral small/);
+  assert.match(html, />SpaceX</);
+  const matches = html.match(/rl-watermark"/g) || [];
+  assert.equal(matches.length, 1);
+});
+
 // --- editors --------------------------------------------------------------
 
 test("main card editor renders without throwing and reports config changes", () => {
@@ -334,6 +455,13 @@ test("main card editor renders without throwing and reports config changes", () 
   };
   editor._update("live_window_hours", 12);
   assert.equal(detail.config.live_window_hours, 12);
+});
+
+test("main card editor includes the max launches field", () => {
+  const editor = new CardEditor();
+  editor.setConfig({ entity: ENTITY_ID });
+  editor.connectedCallback();
+  assert.match(editor.shadowRoot.innerHTML, /Maximum launches to show/);
 });
 
 test("countdown card editor renders without throwing", () => {

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.4
+
+- Visual overhaul to match a premium dashboard look:
+  - Every launch row (hero and compact alike) now has a real 6px colored
+    `border-left` instead of the old floating accent capsule. Color follows
+    status: green for Go/Success, red for Hold/Failure/Scrub, blue/gray for
+    TBD or an ordinary scheduled launch
+  - The launch provider (e.g. SpaceX) is now its own rounded, neutral pill
+    badge, matching the existing status pill
+  - The soft rocket-icon watermark moved from a small per-panel corner
+    decoration to one large, semi-transparent `mdi:rocket-launch` icon
+    anchored to the bottom-left of the whole card background, sized to the
+    very next tracked launch's status color
+  - A compact row's date text is now color-coded by proximity: muted gray
+    beyond 30 days out, warning yellow/orange inside 7 days, and a bold
+    live countdown (instead of the static date) inside 24 hours
+- Added `max_launches` to `rocket-launch-card` (default `0`, meaning no
+  limit) to cap or leave uncapped how many launches the list renders
+
 ## 0.2.3
 
 - Added a fourth blueprint, **pet safety alert**: a short-notice reminder

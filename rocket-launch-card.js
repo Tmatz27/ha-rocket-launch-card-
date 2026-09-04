@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.2.3
+ * Version 0.2.4
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,13 +24,14 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.2.3";
+const ROCKET_LAUNCH_CARD_VERSION = "0.2.4";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
   entity: "",
   live_window_hours: 24,
   show_description: true,
+  max_launches: 0,
 });
 
 const DEFAULT_COUNTDOWN_CONFIG = Object.freeze({
@@ -271,6 +272,25 @@ function isProminent(launch, phase) {
   return phase === "window" || ALWAYS_PROMINENT_STATUSES.has(launch.statusAbbrev);
 }
 
+// Proximity tiers for a compact row's date text: the closer a launch gets,
+// the more visually urgent its color - and once inside a day, the static
+// date is replaced by the same live countdown the hero/countdown cards use.
+const DAY_MS = 24 * 60 * 60 * 1000;
+function rowDateTier(launch, now) {
+  if (launch.targetTs == null) return "normal";
+  const diffMs = launch.targetTs * 1000 - now;
+  if (diffMs <= DAY_MS) return "imminent";
+  if (diffMs <= 7 * DAY_MS) return "soon";
+  if (diffMs > 30 * DAY_MS) return "far";
+  return "normal";
+}
+
+function rowDateText(launch, now, tier) {
+  if (launch.targetTs == null) return launch.netPrecision ? `~${launch.netPrecision} precision` : "Date TBD";
+  if (tier === "imminent") return formatCountdown(launch.targetTs - now / 1000);
+  return formatClock(launch.targetTs);
+}
+
 // --- Shared editor base --------------------------------------------------
 
 const EDITOR_STYLES = `
@@ -476,6 +496,15 @@ class RocketLaunchCardEditor extends RocketLaunchEditorBase {
         hint: "Launches inside this window get the big live countdown treatment. Farther-out launches show as a simple line.",
       },
       { type: "toggle", key: "show_description", label: "Show mission description" },
+      {
+        type: "number",
+        key: "max_launches",
+        label: "Maximum launches to show",
+        min: 0,
+        max: 50,
+        default: DEFAULT_MAIN_CONFIG.max_launches,
+        hint: "0 shows every launch the sensor provides. Set a limit to keep the list shorter.",
+      },
     ]);
   }
 }
@@ -598,31 +627,23 @@ function baseStyles() {
     .hero, .cd-wrap {
       position: relative;
       overflow: hidden;
-      padding: 16px 16px 16px 22px;
+      padding: 16px 16px 16px 18px;
       border: 1px solid var(--rl-border);
+      border-left: 6px solid var(--rl-tone, var(--rl-accent));
       border-radius: 14px;
       background: var(--rl-surface-2);
     }
-    .hero::before, .cd-wrap::before {
-      content: "";
-      position: absolute;
-      left: 8px;
-      top: 14px;
-      bottom: 14px;
-      width: 4px;
-      border-radius: 999px;
-      background: var(--rl-tone, var(--rl-accent));
-    }
     .hero.imminent, .cd-wrap.imminent {
-      border-color: color-mix(in srgb, var(--rl-hot) 45%, var(--rl-border));
+      border-top-color: color-mix(in srgb, var(--rl-hot) 45%, var(--rl-border));
+      border-right-color: color-mix(in srgb, var(--rl-hot) 45%, var(--rl-border));
+      border-bottom-color: color-mix(in srgb, var(--rl-hot) 45%, var(--rl-border));
     }
-    .rl-panel-body { position: relative; z-index: 1; }
     .rl-watermark {
       position: absolute;
-      right: -12px;
-      bottom: -16px;
-      width: 88px;
-      height: 88px;
+      left: -22px;
+      bottom: -26px;
+      width: 190px;
+      height: 190px;
       pointer-events: none;
       z-index: 0;
     }
@@ -631,15 +652,15 @@ function baseStyles() {
       inset: 0;
       border-radius: 50%;
       background: var(--rl-tone, var(--rl-accent));
-      opacity: .14;
+      opacity: .12;
     }
     .rl-watermark-icon {
       position: absolute;
-      right: 14px;
-      bottom: 12px;
-      --mdc-icon-size: 38px;
+      left: 30px;
+      bottom: 26px;
+      --mdc-icon-size: 84px;
       color: var(--rl-tone, var(--rl-accent));
-      opacity: .5;
+      opacity: .32;
     }
     .rl-title {
       display: flex;
@@ -697,6 +718,9 @@ function baseStyles() {
     .rl-badge.hot { color: var(--rl-text); border-color: color-mix(in srgb, var(--rl-hot) 55%, transparent); background: color-mix(in srgb, var(--rl-hot) 20%, transparent); }
     .rl-badge.good { color: var(--rl-text); border-color: color-mix(in srgb, var(--rl-good) 55%, transparent); background: color-mix(in srgb, var(--rl-good) 20%, transparent); }
     .rl-badge.muted { color: var(--rl-muted); border-color: var(--rl-border); background: color-mix(in srgb, var(--rl-text) 6%, transparent); }
+    .rl-badge.neutral { color: var(--rl-text); border-color: var(--rl-border); background: color-mix(in srgb, var(--rl-text) 9%, transparent); }
+    .rl-badge.small { padding: 2px 7px; font-size: 9.5px; }
+    .rl-badge.small ha-icon { --mdc-icon-size: 10px; }
   `;
 }
 
@@ -708,8 +732,10 @@ function baseStyles() {
 function urgencyTone(launch, phase) {
   const abbrev = launch.statusAbbrev;
   if (abbrev === "success") return "good";
+  if (abbrev === "go") return "good";
   if (abbrev === "failure") return "hot";
-  if (abbrev === "hold") return "warn";
+  if (abbrev === "hold") return "hot";
+  if (abbrev.includes("scrub")) return "hot";
   if (abbrev === "inflight" || abbrev === "in flight") return "hot";
   if (abbrev === "tbd") return "muted";
   if (phase === "stale") return "muted";
@@ -751,9 +777,9 @@ function delayBadge(delayInfo) {
   return `<span class="rl-badge warn"><ha-icon icon="mdi:clock-alert-outline"></ha-icon>Slipped from ${escapeHtml(formatShortClock(delayInfo.originalTs))}</span>`;
 }
 
-function watermarkHtml() {
+function watermarkHtml(tone) {
   return `
-    <div class="rl-watermark" aria-hidden="true">
+    <div class="rl-watermark" aria-hidden="true" style="${toneStyleAttr(tone)}">
       <span class="rl-watermark-circle"></span>
       <ha-icon class="rl-watermark-icon" icon="mdi:rocket-launch"></ha-icon>
     </div>
@@ -781,6 +807,7 @@ class RocketLaunchCard extends HTMLElement {
       ...DEFAULT_MAIN_CONFIG,
       ...config,
       live_window_hours: clamp(Number.parseInt(config.live_window_hours, 10) || DEFAULT_MAIN_CONFIG.live_window_hours, 1, 96),
+      max_launches: clamp(Number.parseInt(config.max_launches, 10) || DEFAULT_MAIN_CONFIG.max_launches, 0, 999),
     };
     this._render();
   }
@@ -827,16 +854,18 @@ class RocketLaunchCard extends HTMLElement {
       return;
     }
 
-    const launches = data.launches;
+    const launches = this._config.max_launches > 0 ? data.launches.slice(0, this._config.max_launches) : data.launches;
     const liveWindowMs = this._config.live_window_hours * 60 * 60 * 1000;
     const nearestMs = launches.length && launches[0].targetTs != null ? launches[0].targetTs * 1000 - now : Infinity;
     this._ensureTick(nearestMs < FAST_TICK_THRESHOLD_MS ? FAST_TICK_MS : SLOW_TICK_MS);
 
+    const topTone = launches.length ? urgencyTone(launches[0], launchPhase(launches[0], now)) : null;
     const body = launches.length === 0 ? this._emptyMatchHtml(data.siteFilter) : launches.map((launch) => this._renderLaunch(launch, now, liveWindowMs)).join("");
 
     this._paint(`
       <ha-card>
         ${starfieldHtml()}
+        ${topTone ? watermarkHtml(topTone) : ""}
         <div class="card-content">
           ${this._header(data.siteFilter)}
           <div class="rl-list">${body}</div>
@@ -869,7 +898,7 @@ class RocketLaunchCard extends HTMLElement {
     const phase = launchPhase(launch, now);
     const withinWindow = launch.targetTs != null && launch.targetTs * 1000 - now < liveWindowMs;
     const isLive = withinWindow || isProminent(launch, phase);
-    return isLive ? this._renderHero(launch, now, phase) : this._renderCompactRow(launch, now);
+    return isLive ? this._renderHero(launch, now, phase) : this._renderCompactRow(launch, now, phase);
   }
 
   _renderHero(launch, now, phase) {
@@ -881,38 +910,43 @@ class RocketLaunchCard extends HTMLElement {
 
     return `
       <article class="hero ${urgent ? "imminent" : ""}" style="${toneStyleAttr(tone)}">
-        ${watermarkHtml()}
-        <div class="rl-panel-body">
-          <div class="hero-top">
-            ${urgencyBadge(launch, phase)}
-            ${delayBadge(delayInfo)}
-          </div>
-          <div class="hero-name">${escapeHtml(launch.missionName)}</div>
-          <div class="hero-meta">${escapeHtml(launch.provider)}${launch.rocket ? ` · ${escapeHtml(launch.rocket)}` : ""}</div>
-          <div class="hero-countdown">${escapeHtml(countdown)}</div>
-          <div class="hero-detail">
-            ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
-            ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
-            ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
-          </div>
-          ${this._config.show_description && launch.missionDescription ? `<div class="hero-description">${escapeHtml(launch.missionDescription)}</div>` : ""}
+        <div class="hero-top">
+          ${urgencyBadge(launch, phase)}
+          ${delayBadge(delayInfo)}
         </div>
+        <div class="hero-name">${escapeHtml(launch.missionName)}</div>
+        <div class="hero-meta">
+          ${launch.provider ? `<span class="rl-badge neutral small"><ha-icon icon="mdi:domain"></ha-icon>${escapeHtml(launch.provider)}</span>` : ""}
+          ${launch.rocket ? `<span class="hero-meta-text">${escapeHtml(launch.rocket)}</span>` : ""}
+        </div>
+        <div class="hero-countdown">${escapeHtml(countdown)}</div>
+        <div class="hero-detail">
+          ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
+          ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
+          ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
+        </div>
+        ${this._config.show_description && launch.missionDescription ? `<div class="hero-description">${escapeHtml(launch.missionDescription)}</div>` : ""}
       </article>
     `;
   }
 
-  _renderCompactRow(launch, now) {
+  _renderCompactRow(launch, now, phase) {
     const delayInfo = trackDelay(launch);
-    const when = launch.targetTs != null ? formatClock(launch.targetTs) : launch.netPrecision ? `~${launch.netPrecision} precision` : "Date TBD";
+    const tone = urgencyTone(launch, phase);
+    const tier = rowDateTier(launch, now);
+    const when = rowDateText(launch, now, tier);
     return `
-      <div class="rl-row">
+      <div class="rl-row" style="${toneStyleAttr(tone)}">
         <div class="rl-row-main">
           <span class="rl-row-name">${escapeHtml(launch.missionName)}</span>
-          <span class="rl-row-meta">${escapeHtml(launch.provider)}${launch.padName ? ` · ${escapeHtml(launch.padName)}` : ""}</span>
+          <div class="rl-row-badges">
+            ${launch.provider ? `<span class="rl-badge neutral small"><ha-icon icon="mdi:domain"></ha-icon>${escapeHtml(launch.provider)}</span>` : ""}
+            ${launch.padName ? `<span class="rl-row-meta">${escapeHtml(launch.padName)}</span>` : ""}
+          </div>
         </div>
         <div class="rl-row-side">
           ${delayBadge(delayInfo)}
-          <span class="rl-row-when">${escapeHtml(when)}</span>
+          <span class="rl-row-when rl-tier-${tier}">${escapeHtml(when)}</span>
         </div>
       </div>
     `;
@@ -944,7 +978,8 @@ class RocketLaunchCard extends HTMLElement {
       }
       .hero-top { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
       .hero-name { font-size: 18px; font-weight: 800; letter-spacing: -.01em; }
-      .hero-meta { margin-top: 2px; color: var(--rl-muted); font-size: 12px; }
+      .hero-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+      .hero-meta-text { color: var(--rl-muted); font-size: 12px; }
       .hero-countdown {
         margin: 12px 0;
         font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -975,16 +1010,27 @@ class RocketLaunchCard extends HTMLElement {
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        padding: 10px 14px;
+        padding: 10px 14px 10px 12px;
         border: 1px solid var(--rl-border);
+        border-left: 6px solid var(--rl-tone, var(--rl-accent));
         border-radius: 14px;
         background: rgba(255, 255, 255, .03);
       }
-      .rl-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .rl-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
       .rl-row-name { font-size: 13.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .rl-row-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
       .rl-row-meta { color: var(--rl-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .rl-row-side { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-      .rl-row-when { color: var(--rl-muted); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+      .rl-row-when { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+      .rl-row-when.rl-tier-far { color: var(--rl-muted); }
+      .rl-row-when.rl-tier-normal { color: var(--rl-text); opacity: .85; }
+      .rl-row-when.rl-tier-soon { color: var(--rl-warn); font-weight: 700; }
+      .rl-row-when.rl-tier-imminent {
+        color: var(--rl-hot);
+        font-weight: 800;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12.5px;
+      }
       @media (max-width: 500px) {
         .hero-countdown { font-size: clamp(22px, 8vw, 30px); }
         .rl-row-meta { display: none; }
@@ -1120,23 +1166,24 @@ class RocketLaunchCountdownCard extends HTMLElement {
     return `
       <ha-card>
         ${starfieldHtml()}
+        ${watermarkHtml(tone)}
         <div class="card-content">
           <div class="rl-title">
             <h2>${escapeHtml(this._config.title || DEFAULT_COUNTDOWN_CONFIG.title)}</h2>
             ${urgencyBadge(launch, phase)}
           </div>
           <div class="cd-wrap ${urgent ? "imminent" : ""}" style="${toneStyleAttr(tone)}">
-            ${watermarkHtml()}
-            <div class="rl-panel-body">
-              <div class="cd-name">${escapeHtml(launch.missionName)}</div>
-              <div class="cd-meta">${escapeHtml(launch.provider)}${launch.rocket ? ` · ${escapeHtml(launch.rocket)}` : ""}</div>
-              <div class="cd-big ${phase === "stale" || launch.targetTs == null ? "cd-big-text" : ""}">${escapeHtml(countdown)}</div>
-              ${delayBadge(delayInfo)}
-              <div class="cd-detail">
-                ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
-                ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
-                ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
-              </div>
+            <div class="cd-name">${escapeHtml(launch.missionName)}</div>
+            <div class="cd-meta">
+              ${launch.provider ? `<span class="rl-badge neutral small"><ha-icon icon="mdi:domain"></ha-icon>${escapeHtml(launch.provider)}</span>` : ""}
+              ${launch.rocket ? `<span class="cd-meta-text">${escapeHtml(launch.rocket)}</span>` : ""}
+            </div>
+            <div class="cd-big ${phase === "stale" || launch.targetTs == null ? "cd-big-text" : ""}">${escapeHtml(countdown)}</div>
+            ${delayBadge(delayInfo)}
+            <div class="cd-detail">
+              ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
+              ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
+              ${launch.probability != null ? `<span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${escapeHtml(String(launch.probability))}% go</span>` : ""}
             </div>
           </div>
         </div>
@@ -1178,7 +1225,7 @@ class RocketLaunchCountdownCard extends HTMLElement {
       }
       .rl-dormant ha-icon { --mdc-icon-size: 18px; flex: 0 0 auto; }
       .cd-wrap {
-        padding: 20px 18px 20px 26px;
+        padding: 20px 18px 20px 20px;
         text-align: center;
       }
       .cd-wrap.imminent {
@@ -1189,7 +1236,8 @@ class RocketLaunchCountdownCard extends HTMLElement {
         50% { box-shadow: 0 0 20px color-mix(in srgb, var(--rl-hot) 30%, transparent); }
       }
       .cd-name { font-size: 17px; font-weight: 800; }
-      .cd-meta { margin-top: 2px; color: var(--rl-muted); font-size: 12px; }
+      .cd-meta { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+      .cd-meta-text { color: var(--rl-muted); font-size: 12px; }
       .cd-big {
         margin: 14px 0;
         font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
