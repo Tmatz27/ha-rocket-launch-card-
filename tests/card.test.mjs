@@ -12,6 +12,7 @@ class FakeNode {
     this.className = "";
     this.children = [];
     this._html = "";
+    this._listeners = new Map();
   }
 
   set innerHTML(value) {
@@ -38,6 +39,25 @@ class FakeNode {
 
   querySelectorAll() {
     return [];
+  }
+
+  // Real (if minimal) event plumbing: the card delegates row-click/keydown
+  // handling to one listener on the persistent root element (see
+  // rocket-launch-card.js's _paint), so tests exercise it via dispatchEvent
+  // rather than calling the private handler directly.
+  addEventListener(type, handler) {
+    if (!this._listeners.has(type)) this._listeners.set(type, new Set());
+    this._listeners.get(type).add(handler);
+  }
+
+  removeEventListener(type, handler) {
+    this._listeners.get(type)?.delete(handler);
+  }
+
+  dispatchEvent(event) {
+    const handlers = this._listeners.get(event.type);
+    if (handlers) for (const handler of handlers) handler(event);
+    return true;
   }
 }
 
@@ -133,6 +153,9 @@ function makeRawLaunch({
   netPrecision = null,
   probability = null,
   description = "",
+  orbit = null,
+  landingAttempt = undefined,
+  landingLocation = null,
 } = {}) {
   return {
     id,
@@ -143,6 +166,9 @@ function makeRawLaunch({
     status_abbrev: statusAbbrev,
     provider,
     rocket,
+    orbit,
+    landing_attempt: landingAttempt,
+    landing_location: landingLocation,
     pad_name: padName,
     location_name: locationName,
     net,
@@ -162,6 +188,19 @@ function makeUpcomingState(launches, { siteFilter = "Vandenberg", lastUpdated } 
     state: String(launches.length),
     attributes: { site_filter: siteFilter, launches },
     last_updated: lastUpdated || new Date().toISOString(),
+  };
+}
+
+// A minimal stand-in for a real DOM event target: the card's delegated
+// handler only ever calls target.closest(selector), so that's all this needs
+// to fake. Mirrors how a real click's target.closest("[data-launch-key]")
+// would resolve to the row/hero ancestor carrying that attribute.
+function fakeTargetWithLaunchKey(key) {
+  return {
+    closest(selector) {
+      if (selector === "[data-launch-key]") return { dataset: { launchKey: key } };
+      return null;
+    },
   };
 }
 
@@ -330,13 +369,165 @@ test("provider renders as a neutral pill badge, not plain text", () => {
   assert.match(html, />SpaceX</);
 });
 
-test("card-level watermark reflects the next launch's tone and appears exactly once", () => {
-  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+test("the background watermark icon is gone", () => {
+  const farIso = new Date(Date.now() + 5 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso })]) } };
+  const html = render(new Card(), { entity: ENTITY_ID }, hass);
+
+  assert.doesNotMatch(html, /rl-watermark/);
+});
+
+test("compact row shows a T-minus line beneath the formatted date", () => {
+  const farIso = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
   const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso })]) } };
   const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
 
-  const matches = html.match(/rl-watermark"/g) || [];
-  assert.equal(matches.length, 1, "exactly one card-level watermark should render");
+  assert.match(html, /rl-row-when/, "the static formatted date should still be present");
+  assert.match(html, /T- 1[34] days?/, "a relative T-minus line should appear beneath it");
+});
+
+test("compact row's T-minus line switches to hours inside a day", () => {
+  const soonIso = new Date(Date.now() + 5 * 3600 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: soonIso })]) } };
+  // live_window_hours below 5 keeps this a compact row even though it's under 24h out.
+  const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 1 }, hass);
+
+  assert.match(html, /rl-tier-imminent/);
+  assert.match(html, /\d{2}:\d{2}:\d{2}/, "under 24h the T-minus line becomes a live countdown");
+});
+
+test("clicking a compact row expands its accordion, and clicking again collapses it", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const card = new Card();
+  const hass = {
+    states: {
+      [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ id: "row-1", net: farIso })]),
+    },
+  };
+  let html = render(card, { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+  assert.match(html, /aria-expanded="false"/);
+  assert.doesNotMatch(html, /rl-row-expand-attached open/);
+
+  card._root.dispatchEvent({ type: "click", target: fakeTargetWithLaunchKey("id:row-1") });
+  html = card._root.innerHTML;
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /rl-row-expand-attached open/);
+
+  card._root.dispatchEvent({ type: "click", target: fakeTargetWithLaunchKey("id:row-1") });
+  html = card._root.innerHTML;
+  assert.match(html, /aria-expanded="false"/);
+  assert.doesNotMatch(html, /rl-row-expand-attached open/);
+});
+
+test("a click inside the expanded panel doesn't collapse it", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const card = new Card();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ id: "row-1", net: farIso })]) } };
+  render(card, { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  card._root.dispatchEvent({ type: "click", target: fakeTargetWithLaunchKey("id:row-1") });
+  assert.match(card._root.innerHTML, /aria-expanded="true"/);
+
+  // Simulates a click landing inside .rl-row-expand itself (e.g. on a badge),
+  // which should not also match [data-launch-key] via closest().
+  card._root.dispatchEvent({
+    type: "click",
+    target: { closest: (selector) => (selector === ".rl-row-expand" ? {} : null) },
+  });
+  assert.match(card._root.innerHTML, /aria-expanded="true"/, "still expanded");
+});
+
+test("Enter/Space toggle the accordion the same as a click", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const card = new Card();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ id: "row-1", net: farIso })]) } };
+  render(card, { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+
+  const noop = () => {};
+  card._root.dispatchEvent({ type: "keydown", key: "Tab", target: fakeTargetWithLaunchKey("id:row-1"), preventDefault: noop });
+  assert.match(card._root.innerHTML, /aria-expanded="false"/, "an unrelated key should not toggle");
+
+  card._root.dispatchEvent({ type: "keydown", key: "Enter", target: fakeTargetWithLaunchKey("id:row-1"), preventDefault: noop });
+  assert.match(card._root.innerHTML, /aria-expanded="true"/);
+});
+
+test("accordion shows rocket and orbit pill badges", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const card = new Card();
+  const hass = {
+    states: {
+      [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ id: "row-1", net: farIso, rocket: "Falcon 9", orbit: "Low Earth Orbit" })]),
+    },
+  };
+  render(card, { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+  card._root.dispatchEvent({ type: "click", target: fakeTargetWithLaunchKey("id:row-1") });
+
+  const html = card._root.innerHTML;
+  assert.match(html, /mdi:rocket"/);
+  assert.match(html, />Falcon 9</);
+  assert.match(html, /mdi:orbit/);
+  assert.match(html, />Low Earth Orbit</);
+});
+
+test("accordion shows an Expendable badge when landing_attempt is confirmed false", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const card = new Card();
+  const hass = {
+    states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ id: "row-1", net: farIso, landingAttempt: false })]) },
+  };
+  render(card, { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+  card._root.dispatchEvent({ type: "click", target: fakeTargetWithLaunchKey("id:row-1") });
+
+  assert.match(card._root.innerHTML, /Expendable/);
+});
+
+test("accordion shows the aggressive RTLS warning badge for a Vandenberg/LZ landing", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const card = new Card();
+  const hass = {
+    states: {
+      [ENTITY_ID]: makeUpcomingState([
+        makeRawLaunch({ id: "row-1", net: farIso, landingAttempt: true, landingLocation: "Landing Zone 1 (LZ-1)" }),
+      ]),
+    },
+  };
+  render(card, { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+  card._root.dispatchEvent({ type: "click", target: fakeTargetWithLaunchKey("id:row-1") });
+
+  const html = card._root.innerHTML;
+  assert.match(html, /rtls-warning/);
+  assert.match(html, /Sonic Boom Expected/);
+});
+
+test("accordion uses plain neutral styling for a drone-ship landing", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const card = new Card();
+  const hass = {
+    states: {
+      [ENTITY_ID]: makeUpcomingState([
+        makeRawLaunch({ id: "row-1", net: farIso, landingAttempt: true, landingLocation: "Of Course I Still Love You" }),
+      ]),
+    },
+  };
+  render(card, { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+  card._root.dispatchEvent({ type: "click", target: fakeTargetWithLaunchKey("id:row-1") });
+
+  const html = card._root.innerHTML;
+  assert.doesNotMatch(html, /rtls-warning/);
+  assert.match(html, /Of Course I Still Love You/);
+});
+
+test("accordion shows no landing badge at all when landing_attempt is unknown", () => {
+  const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
+  const card = new Card();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ id: "row-1", net: farIso })]) } };
+  render(card, { entity: ENTITY_ID, live_window_hours: 24 }, hass);
+  card._root.dispatchEvent({ type: "click", target: fakeTargetWithLaunchKey("id:row-1") });
+
+  const html = card._root.innerHTML;
+  assert.doesNotMatch(html, /Expendable/);
+  assert.doesNotMatch(html, /rtls-warning/);
+  assert.doesNotMatch(html, /Landing:/);
 });
 
 test("compact row shows a live countdown and the imminent tier inside 24 hours", () => {
@@ -425,17 +616,45 @@ test("countdown card goes active for a Hold launch even outside the trigger wind
   assert.match(html, /cd-big/);
 });
 
-test("countdown card shows the provider as a pill badge and one tone-matched watermark", () => {
+test("countdown card shows provider, rocket, and orbit as pill badges, no watermark", () => {
   const soonIso = new Date(Date.now() + 1800 * 1000).toISOString();
   const hass = {
-    states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: soonIso, provider: "SpaceX" })]) },
+    states: {
+      [ENTITY_ID]: makeUpcomingState([
+        makeRawLaunch({ net: soonIso, provider: "SpaceX", rocket: "Falcon 9", orbit: "Geostationary Transfer Orbit" }),
+      ]),
+    },
   };
   const html = render(new CountdownCard(), { entity: ENTITY_ID, trigger_hours: 2 }, hass);
 
   assert.match(html, /rl-badge neutral small/);
   assert.match(html, />SpaceX</);
-  const matches = html.match(/rl-watermark"/g) || [];
-  assert.equal(matches.length, 1);
+  assert.match(html, />Falcon 9</);
+  assert.match(html, />Geostationary Transfer Orbit</);
+  assert.doesNotMatch(html, /rl-watermark/);
+});
+
+test("countdown card shows the aggressive RTLS badge always-visible, no click needed", () => {
+  const soonIso = new Date(Date.now() + 1800 * 1000).toISOString();
+  const hass = {
+    states: {
+      [ENTITY_ID]: makeUpcomingState([
+        makeRawLaunch({ net: soonIso, landingAttempt: true, landingLocation: "Vandenberg SFB Landing Zone" }),
+      ]),
+    },
+  };
+  const html = render(new CountdownCard(), { entity: ENTITY_ID, trigger_hours: 2 }, hass);
+
+  assert.match(html, /rtls-warning/);
+  assert.match(html, /Sonic Boom Expected/);
+});
+
+test("countdown card omits the landing badge entirely when landing_attempt is unknown", () => {
+  const soonIso = new Date(Date.now() + 1800 * 1000).toISOString();
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: soonIso })]) } };
+  const html = render(new CountdownCard(), { entity: ENTITY_ID, trigger_hours: 2 }, hass);
+
+  assert.doesNotMatch(html, /cd-landing/);
 });
 
 // --- editors --------------------------------------------------------------

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.5
+
+- Removed the large background rocket-icon watermark added in 0.2.4 - it was
+  bleeding over the bottom list items on longer lists
+- Compact rows now show a relative "T- 14 days" line beneath the formatted
+  date, color-coded by proximity the same way the date line was in 0.2.4
+  (muted beyond 30 days, warning inside 7 days, a bold live countdown inside
+  24 hours) - the formatted date itself no longer changes color or gets
+  replaced
+- Every launch row (hero and compact) is now a clickable accordion: expands
+  in place to show target orbit, rocket, booster landing/RTLS status, and
+  the mission description, handled entirely in the card's own local state
+  rather than Home Assistant's more-info dialog. Keyboard-accessible
+  (Enter/Space)
+- New rocket and orbit pill badges, and a booster landing status badge -
+  "Expendable" for a confirmed no-landing-attempt, a plain pill naming the
+  landing location for a drone-ship recovery, or an aggressive solid-red
+  "⚠️ RTLS Landing: Sonic Boom Expected" badge when the landing location
+  matches LZ-1, LZ-4, RTLS, or Vandenberg. Shown in the accordion on the
+  main card and always-visible on the countdown card. Needs
+  [ha-rocket-launch-tracker](https://github.com/Tmatz27/ha-rocket-launch-tracker)
+  v0.1.3+, which is what actually forwards this data now - see that repo's
+  changelog. The badge is silently omitted (never a guessed "Expendable")
+  against older tracker data that doesn't carry it yet
+
 ## 0.2.4
 
 - Visual overhaul to match a premium dashboard look:
