@@ -42,22 +42,30 @@ trigger:
 variables:
   next_launch_entity: !input next_launch_entity
   raw_state: "{{ states(next_launch_entity) }}"
-  has_value: "{{ raw_state not in ['unknown', 'unavailable', 'none', ''] }}"
-  next_dt: "{{ as_local(as_datetime(raw_state)) if has_value else None }}"
-  is_today: "{{ has_value and next_dt.date() == now().date() }}"
+  launch_ts: "{{ as_timestamp(raw_state, 0) }}"
+  eligible: >-
+    {% set abbrev = (state_attr(next_launch_entity, 'status_abbrev') or '') | lower | replace(' ', '') | replace('-', '') %}
+    {% set label = (state_attr(next_launch_entity, 'status') or '') | lower | replace(' ', '') | replace('-', '') %}
+    {{ launch_ts > 0 and abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] }}
+  computed: >-
+    {% set launch_dt = as_local(as_datetime(launch_ts)) if eligible else none %}
+    {% set current = now() %}
+    {{ dict(fire=(eligible and launch_ts > as_timestamp(current) and launch_dt.date() == current.date()), time_str=(launch_ts | timestamp_custom('%-I:%M %p') if launch_dt is not none else '')) }}
 
 condition:
   - condition: template
-    value_template: "{{ is_today }}"
+    value_template: "{{ computed.fire }}"
 
 action:
+  # Run actions skips automation-level conditions; keep the eligibility guard.
+  - condition: template
+    value_template: "{{ computed.fire }}"
   - action: !input notify_service
     data:
       title: "🚀 Launch today"
       message: >-
         {{ state_attr(next_launch_entity, 'name') }}
         ({{ state_attr(next_launch_entity, 'provider') }}) —
-        {{ state_attr(next_launch_entity, 'pad_name') }} —
-        {{ next_dt | as_timestamp | timestamp_custom('%-I:%M %p') }}
+        {{ state_attr(next_launch_entity, 'pad_name') }} — {{ computed.time_str }}
 
 mode: single

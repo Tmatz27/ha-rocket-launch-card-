@@ -73,40 +73,43 @@ variables:
   history_helper: !input history_helper
   new_state: "{{ states(next_launch_entity) }}"
   new_id: "{{ state_attr(next_launch_entity, 'launch_id') }}"
-  has_new_value: "{{ new_state not in ['unknown', 'unavailable', 'none', ''] and new_id not in [none, ''] }}"
   previous_raw: "{{ states(history_helper) }}"
-  previous_parts: "{{ previous_raw.split('|') if (previous_raw not in ['unknown', 'unavailable', 'none', ''] and '|' in previous_raw) else [] }}"
-  previous_id: "{{ previous_parts[0] if previous_parts | length == 2 else None }}"
-  previous_ts: "{{ previous_parts[1] if previous_parts | length == 2 else None }}"
-  # Every branch ends in one bare {{ dict(...) }} with no surrounding
-  # indentation, same reasoning as the countdown-alert blueprint's
-  # `computed` template: it keeps this a single native value HA can read
-  # `computed.fire` off of, instead of risking a stringified fallback.
-  computed: |-
-    {% set same_launch = has_new_value and previous_id is not none and previous_id == new_id %}
-    {% set new_dt = as_local(as_datetime(new_state)) if has_new_value else None %}
-    {% set old_dt = as_local(as_datetime(previous_ts)) if (same_launch and previous_ts not in [None, '']) else None %}
-    {% set changed_enough = same_launch and old_dt is not none and new_dt is not none and ((new_dt - old_dt).total_seconds() | abs) >= (min_change_minutes | int) * 60 %}
-    {% set direction = 'delayed' if (changed_enough and new_dt > old_dt) else 'moved earlier' %}
-    {% set keep_baseline = same_launch and not changed_enough %}
-    {% set new_key = previous_raw if keep_baseline else ((new_id ~ '|' ~ new_state) if has_new_value else previous_raw) %}
-    {% set new_time_str = (new_dt | as_timestamp | timestamp_custom('%a %-I:%M %p')) if new_dt is not none else '' %}
-    {% set old_time_str = (old_dt | as_timestamp | timestamp_custom('%a %-I:%M %p')) if old_dt is not none else '' %}
-    {{ dict(fire=changed_enough, direction=direction, new_key=new_key, new_time_str=new_time_str, old_time_str=old_time_str) }}
+  computed: >-
+    {% set new_ts = as_timestamp(new_state, 0) %}
+    {% set parts = previous_raw.split('|') %}
+    {% set previous_id = parts[0] if parts | length == 2 else none %}
+    {% set old_ts = as_timestamp(parts[1], 0) if parts | length == 2 else 0 %}
+    {% set abbrev = (state_attr(next_launch_entity, 'status_abbrev') or '') | lower | replace(' ', '') | replace('-', '') %}
+    {% set label = (state_attr(next_launch_entity, 'status') or '') | lower | replace(' ', '') | replace('-', '') %}
+    {% set pending = abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] %}
+    {% set valid = pending and new_ts > as_timestamp(now()) and new_id not in [none, '', 'unknown', 'unavailable'] and previous_raw not in ['unknown', 'unavailable'] %}
+    {% set same_launch = valid and previous_id == new_id and old_ts > 0 %}
+    {% set changed = same_launch and (new_ts-old_ts) | abs >= (min_change_minutes | int) * 60 %}
+    {% set key = previous_raw if same_launch and not changed else (new_id ~ '|' ~ new_state if valid else previous_raw) %}
+    {{ dict(valid=valid, fire=changed, new_key=key, direction=('delayed' if new_ts > old_ts else 'moved earlier'), new_time_str=(new_ts | timestamp_custom('%a %-I:%M %p') if valid else ''), old_time_str=(old_ts | timestamp_custom('%a %-I:%M %p') if old_ts > 0 else '')) }}
 
 condition:
   - condition: template
-    value_template: "{{ computed.fire }}"
+    value_template: "{{ computed.valid }}"
 
 action:
-  - action: !input notify_service
-    data:
-      title: >-
-        {{ '🌩️ Launch delayed' if computed.direction == 'delayed' else '⏱️ Launch moved earlier' }}
-      message: >-
-        {{ state_attr(next_launch_entity, 'name') }}
-        ({{ state_attr(next_launch_entity, 'provider') }}) now targets
-        {{ computed.new_time_str }} (was {{ computed.old_time_str }}).
+  - condition: template
+    value_template: "{{ computed.valid }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ computed.fire }}"
+        sequence:
+          - action: !input notify_service
+            data:
+              title: >-
+                {{ '🌩️ Launch delayed' if computed.direction == 'delayed' else '⏱️ Launch moved earlier' }}
+              message: >-
+                {{ state_attr(next_launch_entity, 'name') }}
+                ({{ state_attr(next_launch_entity, 'provider') }}) now targets
+                {{ computed.new_time_str }} (was {{ computed.old_time_str }}).
+  # Seed a first/new launch silently; keep the last notified baseline for
+  # sub-threshold changes. Notification errors stop before advancing history.
   - action: input_text.set_value
     target:
       entity_id: !input history_helper
