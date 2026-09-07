@@ -109,9 +109,82 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
 | Option | Default | Description |
 | --- | --- | --- |
 | `title` | `Launch Countdown` | Card heading |
-| `entity` | *(required)* | Same sensor as the main card — the countdown tracks whichever launch is first in its list |
+| `entity` | *(required)* | Same sensor as the main card — the countdown tracks the first pending launch, skipping completed outcomes |
 | `trigger_hours` | `2` | The countdown takes over this many hours before launch |
 | `show_when_inactive` | `true` | When outside the window, show a one-line "next launch in..." summary instead of collapsing to nothing |
+
+### Countdown appearance and actions (0.3.0)
+
+The countdown uses violet (`#b49aff`) by default, with a subtle top accent
+instead of a green left stripe. The countdown has no decorative stars or
+moon. Hold/Failure warnings keep their red styling. The full launch-list
+card retains its existing status colors.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `accent_color` | `#b49aff` | Six-digit hex color for the countdown accent; also available in the visual editor |
+| `tap_action` | `{action: popup}` | Action when tapped or activated with Enter/Space |
+| `hold_action` | `{action: none}` | Action after holding at least 500 ms and releasing; Shift+Enter is the keyboard alternative |
+| `popup_card` | `{}` | YAML-only overrides for the built-in main launch card, such as `title`, `max_launches`, `live_window_hours`, and `show_description`; the sensor always follows the countdown |
+
+The visual editor offers **Open launch popup**, **Navigate**, **Sensor
+details**, and **Do nothing** for each gesture. Navigation reveals a path
+field, such as `/lovelace/launches` or a `#launch-popup` used by an existing
+popup card. A swipe/drag cancels the gesture. A hold does not also fire a tap.
+
+To keep the countdown on the front dashboard and open the larger list:
+
+```yaml
+type: custom:rocket-launch-countdown-card
+title: Launch Countdown
+entity: sensor.vandenberg_upcoming_launches
+trigger_hours: 24
+show_when_inactive: true
+accent_color: "#b49aff"
+tap_action:
+  action: popup
+hold_action:
+  action: more-info
+popup_card:
+  title: Vandenberg Launches
+  max_launches: 0
+  show_description: true
+```
+
+No Browser Mod or additional popup integration is required for `action:
+popup`. Close it with its Close button, Escape, or the backdrop. The popup
+continues receiving Home Assistant updates and stops its nested card timer
+when closed. This custom native dialog does not add a browser-history entry;
+use Close/Escape/backdrop rather than browser Back to dismiss it.
+
+To navigate on tap and open the built-in popup on hold:
+
+```yaml
+tap_action:
+  action: navigate
+  navigation_path: /lovelace/launches
+  navigation_replace: false
+hold_action:
+  action: popup
+```
+
+Supported action names are `popup` (specific to this card), `navigate`,
+`more-info`, `none`, and YAML-only `fire-dom-event`. `more-info` accepts an
+optional `entity` override. Navigation accepts same-origin dashboard paths
+starting with `/` or `#`. Other Home Assistant action types and action
+confirmation options are not implemented by this card.
+
+For an existing external popup integration, a YAML `fire-dom-event` action
+forwards the full action object as a bubbling, composed `ll-custom` event.
+The receiving integration must be installed and configured separately.
+Editing other visual settings preserves that action payload.
+
+Completed launches are skipped automatically (Success, Failure, Partial
+Failure). If a pending launch remains, the normal trigger window and
+`show_when_inactive` setting apply to that launch. If no pending launches
+remain, the countdown hides completely, even with `show_when_inactive: true`.
+It reappears when a future sensor update supplies the next pending launch.
+Holds and overdue unconfirmed launches are kept visible.
 
 ## How the live behavior works
 
@@ -123,7 +196,7 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
   paced against Launch Library's rate limit).
 - **Real status, not just timing**: a launch carries an actual status —
   Go, TBD, Hold, Success, Failure, In Flight — shown as a pill badge, and
-  echoed in a 6px left accent bar on every row (green for Go/Success, red
+  echoed in a 6px left accent bar on the main list's rows (green for Go/Success, red
   for Hold/Failure, blue/gray for TBD or an ordinary scheduled launch). A
   Hold or an In-Flight launch stays prominent regardless of the configured
   window. The launch provider gets its own neutral pill badge next to it.
@@ -256,3 +329,20 @@ Card structure and interaction patterns follow the same conventions as
 ## License
 
 MIT
+
+
+### Optional browser interaction checks
+
+`npm test` runs the dependency-free fake-DOM suite. For a real browser check:
+
+```sh
+npm install --no-save playwright
+npx playwright install chromium
+npm run test:browser
+```
+
+An installed Chrome/Chromium can be used with `CHROME_PATH` instead. The
+browser harness serves local fixture data and exercises the actual card
+source; it does not connect to a real Home Assistant server. Its stub
+Home Assistant icons use placeholder glyphs. Screenshots go to
+`test-artifacts/` (or `BROWSER_ARTIFACT_DIR`).

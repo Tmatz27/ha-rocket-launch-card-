@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.2.6
+ * Version 0.3.0
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,7 +24,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.2.6";
+const ROCKET_LAUNCH_CARD_VERSION = "0.3.0";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
@@ -39,6 +39,9 @@ const DEFAULT_COUNTDOWN_CONFIG = Object.freeze({
   entity: "",
   trigger_hours: 2,
   show_when_inactive: true,
+  accent_color: "#b49aff",
+  tap_action: Object.freeze({ action: "popup" }),
+  hold_action: Object.freeze({ action: "none" }),
 });
 
 // Fixed internal refresh-rate threshold: tick every second once a matched
@@ -139,6 +142,16 @@ function readUpcomingEntity(hass, entityId) {
 // countdown card's active state) regardless of how far off the target time
 // looks, since these mean something is actively happening or unresolved.
 const ALWAYS_PROMINENT_STATUSES = new Set(["inflight", "hold"]);
+
+// Keep an API-retained completed mission from pinning the front-facing timer.
+// A hold, scrub, or overdue NET is not proof that the flight has finished.
+function isCompletedLaunch(launch) {
+  const abbrev = String(launch.statusAbbrev || "").toLowerCase().replace(/[\s_-]+/g, "");
+  const status = String(launch.status || "").toLowerCase().trim();
+  return ["success", "failure", "partialfailure"].includes(abbrev)
+    || ["launch successful", "launch success", "success", "launch failure", "failure", "launch was a failure", "launch was a partial failure", "partial failure"].includes(status);
+}
+
 
 function launchKey(launch) {
   // Launch Library assigns a stable id per launch; that's a far better
@@ -335,6 +348,9 @@ const EDITOR_STYLES = `
     margin-bottom: 8px;
   }
   .row-full { margin-bottom: 8px; }
+  .row > label { flex: 1; font-size: 13px; }
+  select { padding: 6px; max-width: 190px; color: var(--primary-text-color); background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 7px; }
+  input[type="color"] { width: 48px; height: 30px; padding: 2px; border: 1px solid var(--divider-color); background: transparent; border-radius: 7px; }
   .label { flex: 1; font-size: 13px; }
   .hint {
     margin: -4px 0 10px;
@@ -456,11 +472,39 @@ class RocketLaunchEditorBase extends HTMLElement {
       });
     });
 
+    this.shadowRoot.querySelectorAll("[data-action]").forEach((select) => {
+      select.addEventListener("change", () => {
+        this._update(select.dataset.action, { action: select.value });
+        this._render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-action-path]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const key = input.dataset.actionPath;
+        this._update(key, { ...this._config[key], navigation_path: input.value.trim() });
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-color]").forEach((input) => {
+      input.addEventListener("change", () => this._update(input.dataset.color, input.value));
+    });
     this._rendered = true;
   }
 
   _renderField(field) {
     const value = this._config[field.key];
+    if (field.type === "action") {
+      const action = value?.action || "none";
+      const choices = [["popup", "Open launch popup"], ["navigate", "Navigate"], ["more-info", "Sensor details"], ["none", "Do nothing"]];
+      // Preserve advanced YAML actions when opening the visual editor.
+      if (!choices.some(([key]) => key === action)) choices.push([action, `Custom: ${action}`]);
+      return `<div class="row"><label for="${field.key}">${escapeHtml(field.label)}</label>
+        <select id="${field.key}" data-action="${field.key}">${choices.map(([key, label]) => `<option value="${escapeHtml(key)}" ${action === key ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></div>
+        ${action === "navigate" ? `<div class="row"><label for="${field.key}-path">Dashboard path</label><input id="${field.key}-path" type="text" data-action-path="${field.key}" value="${escapeHtml(value?.navigation_path || "")}" placeholder="/lovelace/launches"></div>` : ""}`;
+    }
+    if (field.type === "color") {
+      const color = /^#[0-9a-f]{6}$/i.test(value) ? value : DEFAULT_COUNTDOWN_CONFIG.accent_color;
+      return `<div class="row"><label for="${field.key}">${escapeHtml(field.label)}</label><input id="${field.key}" type="color" data-color="${field.key}" value="${color}"></div>`;
+    }
     const hint = field.hint ? `<div class="hint">${escapeHtml(field.hint)}</div>` : "";
     if (field.type === "entity") {
       return `
@@ -544,7 +588,7 @@ class RocketLaunchCountdownCardEditor extends RocketLaunchEditorBase {
         type: "entity",
         key: "entity",
         label: "Upcoming launches sensor",
-        hint: "Same sensor as the main card - the countdown tracks whichever launch is first in its list.",
+        hint: "Same sensor as the main card - the countdown skips completed launches and tracks the next pending launch.",
       },
       {
         type: "number",
@@ -554,6 +598,9 @@ class RocketLaunchCountdownCardEditor extends RocketLaunchEditorBase {
         max: 48,
         default: DEFAULT_COUNTDOWN_CONFIG.trigger_hours,
       },
+      { type: "color", key: "accent_color", label: "Countdown accent color" },
+      { type: "action", key: "tap_action", label: "Tap action" },
+      { type: "action", key: "hold_action", label: "Hold action" },
       {
         type: "toggle",
         key: "show_when_inactive",
@@ -1198,13 +1245,29 @@ class RocketLaunchCountdownCard extends HTMLElement {
     this._tickTimer = null;
     this._tickMs = null;
     this._connected = false;
+    this._gesture = null;
+    this._ignoreClick = false;
+    this._popup = null;
+    this._popupCard = null;
   }
 
   setConfig(config) {
     if (!config) throw new Error("Rocket Launch Countdown Card configuration is required");
+    for (const key of ["tap_action", "hold_action"]) {
+      const action = config[key];
+      if (action != null && (!action || typeof action !== "object" || !["popup", "navigate", "more-info", "none", "fire-dom-event"].includes(action.action))) {
+        throw new Error(`${key}: choose popup, navigate, more-info, none, or fire-dom-event`);
+      }
+    }
+    if (config.accent_color != null && !/^#[0-9a-f]{6}$/i.test(config.accent_color)) {
+      throw new Error("accent_color must be a six-digit hex color, for example #b49aff");
+    }
+    this._closePopup();
     this._config = {
       ...DEFAULT_COUNTDOWN_CONFIG,
       ...config,
+      tap_action: config.tap_action ?? DEFAULT_COUNTDOWN_CONFIG.tap_action,
+      hold_action: config.hold_action ?? DEFAULT_COUNTDOWN_CONFIG.hold_action,
       trigger_hours: clamp(Number.parseInt(config.trigger_hours, 10) || DEFAULT_COUNTDOWN_CONFIG.trigger_hours, 1, 48),
     };
     this._render();
@@ -1212,6 +1275,7 @@ class RocketLaunchCountdownCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._popupCard) this._popupCard.hass = hass;
     this._render();
   }
 
@@ -1223,6 +1287,8 @@ class RocketLaunchCountdownCard extends HTMLElement {
 
   disconnectedCallback() {
     this._connected = false;
+    this._gesture = null;
+    this._closePopup(false);
     if (this._tickTimer) {
       clearInterval(this._tickTimer);
       this._tickTimer = null;
@@ -1252,7 +1318,15 @@ class RocketLaunchCountdownCard extends HTMLElement {
       return;
     }
 
-    const next = data.launches[0];
+    const next = data.launches.find((launch) => !isCompletedLaunch(launch));
+    if (!next) {
+      // show_when_inactive describes the NEXT launch, not a completed mission.
+      this._paint("", true);
+      if (this._tickTimer) clearInterval(this._tickTimer);
+      this._tickTimer = null;
+      this._tickMs = null;
+      return;
+    }
     const triggerMs = this._config.trigger_hours * 60 * 60 * 1000;
     const phase = next ? launchPhase(next, now) : "no-time";
     const withinWindow = next && next.targetTs != null && next.targetTs * 1000 - now <= triggerMs;
@@ -1301,13 +1375,12 @@ class RocketLaunchCountdownCard extends HTMLElement {
 
     return `
       <ha-card>
-        ${starfieldHtml()}
         <div class="card-content">
           <div class="rl-title">
             <h2>${escapeHtml(this._config.title || DEFAULT_COUNTDOWN_CONFIG.title)}</h2>
             ${urgencyBadge(launch, phase)}
           </div>
-          <div class="cd-wrap ${urgent ? "imminent" : ""}" style="${toneStyleAttr(tone)}">
+          <div class="cd-wrap ${urgent ? "imminent" : ""}" style="${toneStyleAttr(tone === "good" || tone === "accent" ? "accent" : tone)}">
             <div class="cd-name">${escapeHtml(launch.missionName)}</div>
             <div class="cd-meta">
               ${launch.provider ? `<span class="rl-badge neutral small"><ha-icon icon="mdi:domain"></ha-icon>${escapeHtml(launch.provider)}</span>` : ""}
@@ -1329,27 +1402,164 @@ class RocketLaunchCountdownCard extends HTMLElement {
 
   _paint(html, allowEmpty) {
     if (allowEmpty && !html) {
+      this._closePopup(false);
       this.style.display = "none";
       if (this._root) this._root.innerHTML = "";
       this._lastHtml = "";
       return;
     }
     this.style.display = "";
-    if (this._root && html === this._lastHtml) return;
+    const sameHtml = this._root && html === this._lastHtml;
     this._lastHtml = html;
     if (!this._root) {
       const style = document.createElement("style");
       style.textContent = baseStyles() + this._styles();
       const root = document.createElement("div");
       root.className = "rl-root";
+      // The focusable action surface survives the one-second countdown repaint.
+      this._bindActions(root);
       this.shadowRoot.replaceChildren(style, root);
       this._root = root;
     }
-    this._root.innerHTML = html;
+    this._root.style?.setProperty("--rl-accent", this._config.accent_color);
+    const enabled = ["tap_action", "hold_action"].some((key) => this._config[key].action !== "none");
+    this._root.setAttribute("role", enabled ? "button" : "group");
+    this._root.setAttribute("tabindex", enabled ? "0" : "-1");
+    this._root.setAttribute("aria-label", `${this._config.title || DEFAULT_COUNTDOWN_CONFIG.title}. ${this._actionLabel("tap")} ${this._actionLabel("hold")}`.trim());
+    this._root.setAttribute("aria-haspopup", ["tap_action", "hold_action"].some((key) => this._config[key].action === "popup") ? "dialog" : "false");
+    if (!sameHtml) this._root.innerHTML = html;
+  }
+
+  _actionLabel(kind) {
+    const action = this._config[`${kind}_action`].action;
+    const labels = { popup: "open launch details", navigate: "navigate", "more-info": "show sensor details", "fire-dom-event": "run custom action" };
+    return labels[action] ? `${kind === "hold" ? "Hold or Shift+Enter" : "Tap or Enter"} to ${labels[action]}.` : "";
+  }
+
+  _bindActions(root) {
+    root.addEventListener("pointerdown", (event) => {
+      if (event.isPrimary === false || event.button !== 0) return;
+      this._ignoreClick = false;
+      this._gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, at: Date.now() };
+    });
+    const cancel = () => {
+      if (!this._gesture) return;
+      this._gesture = null;
+      this._ignoreClick = true;
+    };
+    root.addEventListener("pointermove", (event) => {
+      const g = this._gesture;
+      if (g && g.id === event.pointerId && Math.hypot(event.clientX - g.x, event.clientY - g.y) > 10) cancel();
+    });
+    root.addEventListener("pointercancel", cancel);
+    root.addEventListener("pointerleave", cancel);
+    root.addEventListener("pointerup", (event) => {
+      const g = this._gesture;
+      this._gesture = null;
+      if (!g || g.id !== event.pointerId) return;
+      if (Date.now() - g.at >= 500 && this._config.hold_action.action !== "none") {
+        this._ignoreClick = true;
+        this._runAction("hold");
+      }
+    });
+    root.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (this._ignoreClick) { this._ignoreClick = false; return; }
+      this._runAction("tap");
+    });
+    root.addEventListener("contextmenu", (event) => {
+      if (this._config.hold_action.action !== "none") event.preventDefault();
+    });
+    root.addEventListener("keydown", (event) => {
+      if (!["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      this._ignoreClick = false;
+      this._runAction(event.shiftKey ? "hold" : "tap");
+    });
+  }
+
+  _runAction(kind) {
+    const action = this._config[`${kind}_action`];
+    switch (action.action) {
+      case "popup": this._openPopup(); break;
+      case "navigate": {
+        const path = action.navigation_path;
+        // Dashboard paths and hash popups stay inside this Home Assistant origin.
+        if (typeof path !== "string" || !/^(\/(?![\/\\])|#)/.test(path) || /[\\\r\n]/.test(path)) return;
+        const replace = Boolean(action.navigation_replace);
+        window.history[replace ? "replaceState" : "pushState"](replace ? window.history.state : { from: window.location.pathname + window.location.search + window.location.hash }, "", path);
+        window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace } }));
+        break;
+      }
+      case "more-info":
+        this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: action.entity || this._config.entity }, bubbles: true, composed: true }));
+        break;
+      case "fire-dom-event":
+        this.dispatchEvent(new CustomEvent("ll-custom", { detail: action, bubbles: true, composed: true }));
+        break;
+    }
+  }
+
+  _openPopup() {
+    if (this._popup || !this._connected) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "cd-popup";
+    dialog.setAttribute("aria-label", "Upcoming rocket launches");
+    dialog.innerHTML = `<div class="cd-popup-toolbar"><span>Launch details</span><button type="button" autofocus aria-label="Close launch details">Close <span aria-hidden="true">×</span></button></div><div class="cd-popup-content"></div>`;
+    const card = document.createElement("rocket-launch-card");
+    card.setConfig({ ...DEFAULT_MAIN_CONFIG, ...this._config.popup_card, entity: this._config.entity });
+    card.hass = this._hass;
+    dialog.querySelector(".cd-popup-content").appendChild(card);
+    dialog.querySelector("button").addEventListener("click", () => this._closePopup());
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); this._closePopup(); });
+    dialog.addEventListener("close", () => { if (this._popup === dialog) this._closePopup(); });
+    // Both ends must be outside, so dragging/selecting text out of the popup won't close it.
+    let backdropDown = false;
+    const outside = (event) => {
+      const r = dialog.getBoundingClientRect();
+      return event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom;
+    };
+    dialog.addEventListener("pointerdown", (event) => { backdropDown = event.target === dialog && outside(event); });
+    dialog.addEventListener("click", (event) => {
+      if (backdropDown && event.target === dialog && outside(event)) this._closePopup();
+      backdropDown = false;
+    });
+    this._popup = dialog;
+    this._popupCard = card;
+    this.shadowRoot.appendChild(dialog);
+    dialog.showModal();
+  }
+
+  _closePopup(restoreFocus = true) {
+    const dialog = this._popup;
+    if (!dialog) return;
+    this._popup = null;
+    this._popupCard = null;
+    dialog.close();
+    dialog.remove(); // Disconnect the nested card and stop its timer.
+    if (restoreFocus && this._connected) this._root?.focus();
   }
 
   _styles() {
     return `
+      .rl-root { border-radius: var(--ha-card-border-radius, 18px); }
+      .rl-root[role="button"] { cursor: pointer; touch-action: pan-y; -webkit-tap-highlight-color: transparent; }
+      .rl-root:focus-visible { outline: 2px solid var(--rl-accent); outline-offset: 4px; }
+      .rl-title { align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+      .rl-title h2 { overflow-wrap: anywhere; }
+      .rl-title .rl-badge.good { border-color: color-mix(in srgb, var(--rl-accent) 45%, transparent); background: color-mix(in srgb, var(--rl-accent) 12%, transparent); }
+      .cd-wrap { border-left-width: 1px; border-left-color: var(--rl-border); background: linear-gradient(155deg, color-mix(in srgb, var(--rl-accent) 7%, transparent), transparent 65%), var(--rl-surface-2); }
+      .cd-wrap::before { content: ""; position: absolute; top: 0; left: 14%; right: 14%; height: 2px; background: linear-gradient(90deg, transparent, var(--rl-accent), transparent); }
+      .cd-landing .rl-badge { white-space: normal; text-align: left; overflow-wrap: anywhere; }
+      .cd-landing ha-icon { flex-shrink: 0; }
+      .cd-popup { width: min(720px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; margin: auto; border: 1px solid var(--rl-border); border-radius: 18px; background: var(--rl-surface); color: var(--rl-text); box-shadow: 0 24px 80px #0008; overscroll-behavior: contain; }
+      .cd-popup::backdrop { background: #0009; backdrop-filter: blur(4px); }
+      .cd-popup-toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--rl-surface); border-bottom: 1px solid var(--rl-border); font-size: 14px; }
+      .cd-popup-toolbar button { min-height: 40px; padding: 8px 12px; font: inherit; color: var(--rl-text); border: 1px solid var(--rl-border); border-radius: 10px; background: var(--rl-surface-2); cursor: pointer; }
+      .cd-popup-content { padding: 12px; }
+      @media (prefers-reduced-motion: reduce) { .cd-wrap.imminent { animation: none !important; } }
       .rl-dormant {
         display: flex;
         align-items: center;
@@ -1458,3 +1668,4 @@ console.info(
   "color: white; background: #4a5bc7; font-weight: 700;",
   "color: #4a5bc7; background: transparent;",
 );
+

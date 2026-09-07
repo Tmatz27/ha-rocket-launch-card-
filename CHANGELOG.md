@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0
+
+- Completed launches no longer pin the countdown to "Awaiting updated status".
+  It skips success, failure, and partial failure, selects the next pending
+  mission, and hides completely when none remain. A hold or overdue launch
+  remains visible until the API reports a completed outcome.
+- Releases now follow successful main-branch validation, use matching
+  semantic versions, include these release notes, and attach the actual
+  JavaScript file for HACS. Existing published versions are not overwritten.
+
+- Cleaned up the countdown card: removed its decorative star dots and moon,
+  replaced the inset green stripe with a subtle violet top accent, and
+  matched the normal countdown and Go badge to a configurable accent color.
+  Warning/error status colors remain distinct. The main launch list retains
+  its existing styling.
+- Added independent tap and hold actions to the countdown visual editor:
+  built-in launch popup, navigation, sensor details, or no action. Advanced
+  YAML can dispatch `fire-dom-event` for external popup integrations.
+- Tapping now opens the full upcoming-launch card by default. Its native
+  modal needs no extra integration, stays current with sensor updates, and
+  supports Close, Escape, backdrop dismissal, and focus restoration.
+- Added keyboard actions (Enter/Space for tap, Shift+Enter for hold),
+  movement/cancel handling to avoid opening on scroll, and regression tests.
+- Countdown headers and long landing badges wrap at narrow widths. The
+  countdown pulse respects reduced-motion preferences.
+
 ## 0.2.6
 
 - **Fixed confusing T-minus math**: the T-minus line truncated to whole
@@ -133,3 +159,4 @@
 - Two automation blueprints: a daily "launch today" alert, and a countdown
   alert that fires at T-minus-N-minutes but never later than a fallback clock
   time, so an overnight launch still warns you before bed
+
