@@ -80,6 +80,14 @@ check(await touch.evaluate(()=>calls.filter(c=>c.type==='hass-more-info').length
 check(await touch.locator('dialog').count()===0,'mobile touch hold suppresses popup tap');
 await touch.touchscreen.tap(touchBox.x+40,touchBox.y+50);
 check(await touch.locator('dialog').count()===1,'mobile touch tap opens popup');
+await touch.evaluate(()=>{const launch=fixtureHass.states[baseConfig.entity].attributes.launches[0];launch.status_abbrev='Success';launch.status='Launch Successful';launch.net=new Date(Date.now()-3600000).toISOString();card.hass=fixtureHass;});
+check(await touch.locator('dialog').count()===1,'popup stays open when pending launches remain');
+check(!(await touch.locator('dialog').textContent()).includes('Starlink Group 15-24'),'open popup removes newly completed mission');
+check(await touch.locator('dialog .rl-row').count()===2,'popup retains both pending missions after live completion');
+await touch.locator('dialog button').click();
+await touch.locator('#countdown .rl-root').tap();
+check(!(await touch.locator('dialog').textContent()).includes('Starlink Group 15-24'),'reopened popup also excludes retained completed mission');
+check(!(await touch.locator('dialog').textContent()).includes('T+'),'completed flight no longer leaves stale elapsed timer in popup');
 await touch.evaluate(()=>{fixtureHass.states[baseConfig.entity].attributes.launches.forEach(l=>{l.status_abbrev='Success';l.status='Launch Successful';});card.hass=fixtureHass;});
 check(await touch.locator('#countdown').evaluate(e=>e.style.display)==='none','live success update hides completed countdown');
 check(await touch.locator('dialog').count()===0,'completion closes existing popup');
@@ -88,4 +96,3 @@ await touchContext.close();
 check(errors.length===0,'no browser runtime errors: '+errors.join(';'));
 console.log(`${checks} browser checks passed`);
 } finally {await browser.close();await new Promise(r=>server.close(r));}
-

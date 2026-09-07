@@ -815,6 +815,48 @@ test("touch pointerleave after release does not swallow the tap", () => {
 
 // A completed launch can remain in the upstream upcoming list for a while.
 for (const statusAbbrev of ["Success", "Failure", "Partial Failure"]) {
+  test(`upcoming list excludes completed ${statusAbbrev}`, () => {
+    const html = render(new Card(), { entity: ENTITY_ID }, {
+      states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({
+        statusAbbrev, missionName: "Finished mission", net: new Date(Date.now()-3600000).toISOString(),
+      })]) },
+    });
+    assert.doesNotMatch(html, /Finished mission|T\+/);
+    assert.match(html, /No upcoming launches tracked/);
+  });
+}
+
+test("upcoming list filters completed missions before applying max_launches without mutating sensor data", () => {
+  const launches = [
+    makeRawLaunch({id:"done",missionName:"Finished mission",statusAbbrev:"Success"}),
+    makeRawLaunch({id:"next",missionName:"Next mission"}),
+    makeRawLaunch({id:"later",missionName:"Later mission"}),
+  ];
+  const before = JSON.stringify(launches);
+  const html = render(new Card(), {entity:ENTITY_ID,max_launches:1}, {states:{[ENTITY_ID]:makeUpcomingState(launches)}});
+  assert.match(html,/Next mission/);
+  assert.doesNotMatch(html,/Finished mission|Later mission/);
+  assert.equal(JSON.stringify(launches),before);
+});
+
+test("upcoming list retains overdue Go, Hold and InFlight missions", () => {
+  for (const statusAbbrev of ["Go", "Hold", "InFlight"]) {
+    const html = render(new Card(), {entity:ENTITY_ID}, {states:{[ENTITY_ID]:makeUpcomingState([
+      makeRawLaunch({statusAbbrev,missionName:"Unresolved mission",net:new Date(Date.now()-3600000).toISOString()}),
+    ])}});
+    assert.match(html,/Unresolved mission/);
+  }
+});
+
+test("upcoming list recognizes successful status text without an abbreviation", () => {
+  const html = render(new Card(), {entity:ENTITY_ID}, {states:{[ENTITY_ID]:makeUpcomingState([
+    makeRawLaunch({statusAbbrev:"",status:"Launch Successful",missionName:"Finished mission"}),
+  ])}});
+  assert.doesNotMatch(html,/Finished mission/);
+  assert.match(html,/No upcoming launches tracked/);
+});
+
+for (const statusAbbrev of ["Success", "Failure", "Partial Failure"]) {
   test(`countdown hides completed ${statusAbbrev} even when show_when_inactive is true`, () => {
     const card = new CountdownCard();
     render(card, { entity: ENTITY_ID, show_when_inactive: true }, {
