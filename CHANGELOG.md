@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1
+
+- Fixed completed launches remaining in the launch-details popup after the
+  front countdown had moved on. The popup and standalone upcoming-launch list
+  now skip Success, Failure, and Partial Failure using the countdown's rules.
+- Apply the launch limit after filtering, so completed flights do not displace
+  upcoming missions. Status updates also remove completed flights from an
+  already-open popup. Holds, in-flight launches and overdue unconfirmed launches
+  remain visible.
+- Added regression coverage for popup opening, live completion updates,
+  completed-only lists, and launch limits. No configuration changes required.
+
 ## 0.3.0
 
 - Completed launches no longer pin the countdown to "Awaiting updated status".
@@ -159,4 +171,3 @@
 - Two automation blueprints: a daily "launch today" alert, and a countdown
   alert that fires at T-minus-N-minutes but never later than a fallback clock
   time, so an overnight launch still warns you before bed
-

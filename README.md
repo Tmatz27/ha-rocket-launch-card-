@@ -179,6 +179,11 @@ forwards the full action object as a bubbling, composed `ll-custom` event.
 The receiving integration must be installed and configured separately.
 Editing other visual settings preserves that action payload.
 
+As of 0.3.1, the launch-details popup and standalone upcoming-launch list also
+skip completed outcomes, including while the popup is open. The `max_launches`
+limit applies to pending launches after filtering. Holds and in-flight missions
+remain visible until their outcome is confirmed.
+
 Completed launches are skipped automatically (Success, Failure, Partial
 Failure). If a pending launch remains, the normal trigger window and
 `show_when_inactive` setting apply to that launch. If no pending launches
