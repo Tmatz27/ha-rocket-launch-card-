@@ -699,3 +699,178 @@ test("countdown card editor renders without throwing", () => {
   editor.connectedCallback();
   assert.match(editor.shadowRoot.innerHTML, /Appear this many hours before launch/);
 });
+
+
+// --- countdown interactions ----------------------------------------------
+
+function countdownWithActions(config = {}) {
+  const card = new CountdownCard();
+  render(card, { entity: ENTITY_ID, ...config }, {
+    states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: new Date(Date.now() + 3600000).toISOString() })]) },
+  });
+  return card;
+}
+function pointer(type, overrides = {}) {
+  return { type, pointerId: 1, button: 0, isPrimary: true, clientX: 20, clientY: 20, stopPropagation() {}, preventDefault() {}, ...overrides };
+}
+
+test("countdown defaults to a launch popup, configurable violet, and no hold action", () => {
+  const card = countdownWithActions();
+  assert.equal(card._config.tap_action.action, "popup");
+  assert.equal(card._config.hold_action.action, "none");
+  assert.equal(card._config.accent_color, "#b49aff");
+  assert.doesNotMatch(card._root.innerHTML, /rl-stars|rl-moon/);
+  assert.match(card._root.innerHTML, /--rl-tone: var\(--rl-accent\)/);
+});
+
+test("hold fires once on release, suppresses tap, and a later tap still works", () => {
+  const card = countdownWithActions({ hold_action: { action: "more-info" } });
+  const actions = [];
+  card._runAction = (kind) => actions.push(kind);
+  card._root.dispatchEvent(pointer("pointerdown"));
+  card._gesture.at -= 700;
+  card._root.dispatchEvent(pointer("pointerup"));
+  card._root.dispatchEvent(pointer("click"));
+  assert.deepEqual(actions, ["hold"]);
+  card._root.dispatchEvent(pointer("pointerdown"));
+  card._root.dispatchEvent(pointer("pointerup"));
+  card._root.dispatchEvent(pointer("click"));
+  assert.deepEqual(actions, ["hold", "tap"]);
+});
+
+test("scrolling and pointer cancellation suppress both actions", () => {
+  for (const cancelType of ["pointermove", "pointercancel", "pointerleave"]) {
+    const card = countdownWithActions({ hold_action: { action: "popup" } });
+    const actions = [];
+    card._runAction = (kind) => actions.push(kind);
+    card._root.dispatchEvent(pointer("pointerdown"));
+    card._gesture.at -= 700;
+    card._root.dispatchEvent(pointer(cancelType, { clientY: 50 }));
+    card._root.dispatchEvent(pointer("pointerup"));
+    card._root.dispatchEvent(pointer("click"));
+    assert.deepEqual(actions, [], cancelType);
+  }
+});
+
+test("right-click does not start a hold", () => {
+  const card = countdownWithActions({ hold_action: { action: "popup" } });
+  card._root.dispatchEvent(pointer("pointerdown", { button: 2 }));
+  assert.equal(card._gesture, null);
+});
+
+test("Enter and Space tap; Shift+Enter holds; repeat keydown is ignored", () => {
+  const card = countdownWithActions();
+  const actions = [];
+  card._runAction = (kind) => actions.push(kind);
+  for (const options of [{ key: "Enter" }, { key: " " }, { key: "Enter", shiftKey: true }, { key: "Enter", repeat: true }]) {
+    card._root.dispatchEvent(pointer("keydown", options));
+  }
+  assert.deepEqual(actions, ["tap", "tap", "hold"]);
+});
+
+test("more-info supports entity override and external popup event keeps its payload", () => {
+  const action = { action: "fire-dom-event", browser_mod: { service: "browser_mod.popup", data: { title: "Launches" } } };
+  const card = countdownWithActions({ tap_action: action, hold_action: { action: "more-info", entity: "sensor.override" } });
+  const events = [];
+  card.dispatchEvent = (event) => events.push(event);
+  card._runAction("tap");
+  card._runAction("hold");
+  assert.equal(events[0].type, "ll-custom");
+  assert.equal(events[0].detail, action);
+  assert.equal(events[1].detail.entityId, "sensor.override");
+});
+
+test("disabled countdown actions remove keyboard button affordance", () => {
+  const card = countdownWithActions({ tap_action: { action: "none" }, hold_action: { action: "none" } });
+  assert.equal(card._root.role, "group");
+  assert.equal(card._root.tabindex, "-1");
+});
+
+test("countdown rejects malformed colors and unsupported actions", () => {
+  assert.throws(() => countdownWithActions({ accent_color: 'red; background: url(x)' }), /hex color/);
+  assert.throws(() => countdownWithActions({ tap_action: { action: "toggle" } }), /choose popup/);
+  assert.throws(() => countdownWithActions({ hold_action: "navigate" }), /choose popup/);
+});
+
+test("countdown editor exposes color and separate tap/hold controls", () => {
+  const editor = new CountdownCardEditor();
+  editor.setConfig({ ...CountdownCard.getStubConfig(), tap_action: { action: "navigate", navigation_path: "/lovelace/launches" } });
+  assert.match(editor.shadowRoot.innerHTML, /Countdown accent color/);
+  assert.match(editor.shadowRoot.innerHTML, /data-action="tap_action"/);
+  assert.match(editor.shadowRoot.innerHTML, /data-action="hold_action"/);
+  assert.match(editor.shadowRoot.innerHTML, /\/lovelace\/launches/);
+});
+
+test("touch pointerleave after release does not swallow the tap", () => {
+  const card = countdownWithActions();
+  const actions = [];
+  card._runAction = (kind) => actions.push(kind);
+  card._root.dispatchEvent(pointer("pointerdown"));
+  card._root.dispatchEvent(pointer("pointerup"));
+  card._root.dispatchEvent(pointer("pointerleave"));
+  card._root.dispatchEvent(pointer("click"));
+  assert.deepEqual(actions, ["tap"]);
+});
+
+
+// A completed launch can remain in the upstream upcoming list for a while.
+for (const statusAbbrev of ["Success", "Failure", "Partial Failure"]) {
+  test(`countdown hides completed ${statusAbbrev} even when show_when_inactive is true`, () => {
+    const card = new CountdownCard();
+    render(card, { entity: ENTITY_ID, show_when_inactive: true }, {
+      states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({statusAbbrev, net: new Date(Date.now()-3600000).toISOString()})]) },
+    });
+    assert.equal(card.style.display, "none");
+    assert.equal(card._root?.innerHTML || "", "");
+  });
+}
+
+test("countdown skips a successful first launch and activates the next pending launch", () => {
+  const card = new CountdownCard();
+  const html = render(card, { entity: ENTITY_ID }, { states: { [ENTITY_ID]: makeUpcomingState([
+    makeRawLaunch({id:"done",missionName:"Finished mission",statusAbbrev:"Success",net:new Date(Date.now()-3600000).toISOString()}),
+    makeRawLaunch({id:"next",missionName:"Next mission",net:new Date(Date.now()+1800000).toISOString()}),
+  ]) } });
+  assert.match(html, /Next mission/);
+  assert.doesNotMatch(html, /Finished mission|Awaiting updated status/);
+});
+
+test("countdown completion falls back to the next launch's dormant setting", () => {
+  for (const show of [true, false]) {
+    const card = new CountdownCard();
+    render(card, { entity: ENTITY_ID, show_when_inactive: show }, { states: { [ENTITY_ID]: makeUpcomingState([
+      makeRawLaunch({id:"done", statusAbbrev:"Success"}),
+      makeRawLaunch({id:"next",net:new Date(Date.now()+7*86400000).toISOString()}),
+    ]) } });
+    assert.equal(card.style.display, show ? "" : "none");
+    if (show) assert.match(card._root.innerHTML, /rl-dormant/);
+  }
+});
+
+test("overdue Go and Hold are not mistaken for a completed launch", () => {
+  for (const statusAbbrev of ["Go", "Hold"]) {
+    const card = new CountdownCard();
+    const html = render(card, { entity: ENTITY_ID }, { states: { [ENTITY_ID]: makeUpcomingState([
+      makeRawLaunch({statusAbbrev,net:new Date(Date.now()-3600000).toISOString()}),
+    ]) } });
+    assert.equal(card.style.display, "");
+    assert.match(html, /Awaiting updated status/);
+  }
+});
+
+test("countdown recognizes successful status text when abbreviation is absent", () => {
+  const card = new CountdownCard();
+  render(card, { entity: ENTITY_ID }, { states: { [ENTITY_ID]: makeUpcomingState([
+    makeRawLaunch({statusAbbrev:"",status:"Launch Successful",net:new Date(Date.now()-3600000).toISOString()}),
+  ]) } });
+  assert.equal(card.style.display, "none");
+});
+
+test("countdown returns when a later sensor update supplies a new pending launch", () => {
+  const card = new CountdownCard();
+  render(card, {entity:ENTITY_ID}, {states:{[ENTITY_ID]:makeUpcomingState([])}});
+  assert.equal(card.style.display,"none");
+  card.hass={states:{[ENTITY_ID]:makeUpcomingState([makeRawLaunch({net:new Date(Date.now()+1800000).toISOString()})])}};
+  assert.equal(card.style.display,"");
+  assert.match(card._root.innerHTML,/cd-big/);
+});
