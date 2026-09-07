@@ -247,10 +247,30 @@ the tracker's **Next Launch** sensor (a timestamp entity —
 own Home Assistant), or **Settings → Automations & Scenes → Blueprints →
 Import Blueprint** and paste the raw GitHub URL.
 
+### Updating existing blueprints (0.3.2)
+
+HACS updates the card; it does **not** replace blueprints already imported in
+Home Assistant. Go to **Settings > Automations & scenes > Blueprints**, open
+each Rocket Launch blueprint's three-dot menu, select **Re-import blueprint**,
+and reload automations. Existing inputs remain compatible. If you previously
+used **Take control**, that automation is an independent copy: update its YAML
+or recreate it from the blueprint instead. Save any personal blueprint edits
+before re-importing. See [Home Assistant's re-import guide](https://www.home-assistant.io/docs/automation/using_blueprints/#re-importing-a-blueprint).
+
+Version 0.3.2 fixes datetime/string errors in the day/countdown/pet templates,
+the countdown's overnight fallback, and the reschedule history initialization.
+Each countdown, pet and reschedule automation must have its own Text helper.
+An empty, available helper is valid; an unavailable helper pauses that alert.
+Manual **Run actions** now obeys eligibility checks, so it may correctly send
+nothing outside the alert window. Test the notify action separately in
+Developer Tools > Actions if you only want to verify phone delivery.
+
 ### Launch day alert
 
 Checks once a day and sends one notification if a launch is scheduled for
-today, naming it and its time.
+today and still ahead, naming it and its time. Set the daily check before
+the launches you want to hear about: the default 8 AM is too late for a
+7:26 AM launch. Missed daily checks are not replayed after downtime.
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FTmatz27%2Fha-rocket-launch-card-%2Fmain%2Fblueprints%2Fautomation%2Frocket_launch_day_alert.yaml)
 
@@ -261,6 +281,13 @@ fallback clock time (default 8:30 PM). A launch at 2 AM still gets a
 heads-up at 8:30 PM the evening before instead of a 1-hour warning while
 you're asleep; a launch at 6 PM still gets the normal 1-hour warning at 5 PM
 since that's earlier than the fallback.
+
+The **Earliest morning alert time** defaults to 6 AM. If the normal warning
+would be earlier, the fallback is the preceding evening. Later warnings use
+that same day's fallback. Future days do not borrow today's bedtime. Alerts
+do not catch up during quiet hours; the minute containing the evening cutoff
+is included because the trigger runs once per minute. Set morning earlier
+than the evening cutoff. Date/lead calculations use the configured HA timezone.
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FTmatz27%2Fha-rocket-launch-card-%2Fmain%2Fblueprints%2Fautomation%2Frocket_launch_countdown_alert.yaml)
 
@@ -283,6 +310,11 @@ becomes "next" after today's one flies — that's not a reschedule.
 This also needs a **one-time helper** (same steps as above) — use a
 **different** Text helper than the countdown alert's, since they track
 different things.
+
+The first valid observation silently seeds the history helper. A different
+mission also replaces that baseline silently; only a qualifying time change
+for the same mission sends a notification. Failed notification actions do
+not advance the baseline, so the next sensor update can retry.
 
 ### Pet safety alert
 
