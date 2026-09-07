@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.3.0
+ * Version 0.3.1
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,7 +24,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.3.0";
+const ROCKET_LAUNCH_CARD_VERSION = "0.3.1";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
@@ -955,7 +955,10 @@ class RocketLaunchCard extends HTMLElement {
       return;
     }
 
-    const launches = this._config.max_launches > 0 ? data.launches.slice(0, this._config.max_launches) : data.launches;
+    // The popup uses this same upcoming list. Filter before applying the cap
+    // so an API-retained completed flight cannot hide the next pending one.
+    const pending = data.launches.filter((launch) => !isCompletedLaunch(launch));
+    const launches = this._config.max_launches > 0 ? pending.slice(0, this._config.max_launches) : pending;
     const liveWindowMs = this._config.live_window_hours * 60 * 60 * 1000;
     const nearestMs = launches.length && launches[0].targetTs != null ? launches[0].targetTs * 1000 - now : Infinity;
     this._ensureTick(nearestMs < FAST_TICK_THRESHOLD_MS ? FAST_TICK_MS : SLOW_TICK_MS);
@@ -1668,4 +1671,3 @@ console.info(
   "color: white; background: #4a5bc7; font-weight: 700;",
   "color: #4a5bc7; background: transparent;",
 );
-
