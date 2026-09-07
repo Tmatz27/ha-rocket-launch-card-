@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Launch Countdown preview</title>
+<style>
+:root { color-scheme: dark; --ha-card-background:#1e2024; --card-background-color:#1e2024; --secondary-background-color:#23252a; --primary-text-color:#f2f1f6; --secondary-text-color:#a4a5b1; --divider-color:#ffffff16; --ha-card-border-radius:18px; font-family:system-ui,sans-serif; }
+body { margin:0; background:#141519; color:var(--primary-text-color); padding:32px 20px; }
+main { max-width:560px; margin:0 auto; } header { margin-bottom:24px; } header p { color:#9696a5; font-size:13px; line-height:1.6; } header span { color:#b49aff; font-size:11px; letter-spacing:.16em; text-transform:uppercase; } h1 {font-size:24px; margin:10px 0 4px; font-weight:600} #hint {font-size:12px; color:#9696a5; text-align:center; margin:18px 0 32px} #editor {display:none} @media(max-width:450px){body{padding:20px 12px}}
+</style>
+<main><header><span>Rocket Launch · 0.3.0 preview</span><h1>Your launch, at a glance.</h1><p>Violet accents, a clean header, and launch details one tap away.<br>Sample data — this preview is not connected to Home Assistant.</p></header><rocket-launch-countdown-card id="countdown"></rocket-launch-countdown-card><p id="hint">Tap for all launches · Hold for sensor details</p><rocket-launch-countdown-card-editor id="editor"></rocket-launch-countdown-card-editor></main>
+<script>
+// Small Home Assistant shell for testing the real custom card in a browser.
+customElements.define('ha-card',class extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'}).innerHTML='<style>:host{display:block}</style><slot></slot>';}});
+customElements.define('ha-icon',class extends HTMLElement{connectedCallback(){if(this.shadowRoot)return;this.attachShadow({mode:'open'}).innerHTML='<style>:host{display:inline-flex;width:var(--mdc-icon-size,18px);height:var(--mdc-icon-size,18px);vertical-align:middle;flex-shrink:0}svg{width:100%;height:100%}</style><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>';}});
+window.calls=[];
+document.addEventListener('hass-more-info',e=>window.calls.push({type:e.type,...e.detail}));
+document.addEventListener('ll-custom',e=>window.calls.push({type:e.type,...e.detail}));
+window.addEventListener('location-changed',e=>window.calls.push({type:e.type,...e.detail}));
+</script><script src="/rocket-launch-card.js"></script><script>
+const now=Date.now();
+window.fixtureLaunch={id:'preview-1',name:'Falcon 9 | Starlink Group 15-24',mission_name:'Starlink Group 15-24',mission_description:'A mission delivering a new group of Starlink satellites to low Earth orbit from Vandenberg Space Force Base.',provider:'SpaceX',rocket:'Falcon 9',orbit:'Low Earth Orbit',pad_name:'Space Launch Complex 4E',status:'Go for Launch',status_abbrev:'Go',net:new Date(now+8.5*3600000).toISOString(),landing_attempt:true,landing_location:'Of Course I Still Love You'};
+window.fixtureHass={states:{'sensor.vandenberg_upcoming_launches':{state:'3',last_updated:new Date(now).toISOString(),attributes:{site_filter:'Vandenberg',launches:[fixtureLaunch,{...fixtureLaunch,id:'preview-2',mission_name:'Transporter rideshare',net:new Date(now+3*86400000).toISOString()},{...fixtureLaunch,id:'preview-3',mission_name:'Earth observation mission',net:new Date(now+8*86400000).toISOString()}]}}}};
+window.card=document.querySelector('#countdown');
+window.baseConfig={entity:'sensor.vandenberg_upcoming_launches',trigger_hours:24,hold_action:{action:'more-info'}};
+card.setConfig(baseConfig);card.hass=fixtureHass;
+window.editor=document.querySelector('#editor');editor.setConfig(baseConfig);editor.hass=fixtureHass;
+</script></html>
