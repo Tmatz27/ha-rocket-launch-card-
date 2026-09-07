@@ -1,0 +1,4 @@
+# Test-only dependencies; blueprints need no extra HA integration.
+Jinja2==3.1.6
+PyYAML==6.0.2
+tzdata==2025.2

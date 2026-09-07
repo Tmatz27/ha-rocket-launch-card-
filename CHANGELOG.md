@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.2
+
+- Fixed blueprint variable-rendering errors: Home Assistant converts datetime
+  outputs to strings between automation variables. Date objects now stay inside
+  individual templates; shared variables use timestamps and simple values.
+- Countdown fallback now belongs to the relevant launch evening, preventing
+  alerts days early. Early-morning warnings move to the previous evening,
+  with an optional earliest-morning setting (default 6 AM). Quiet hours also
+  prevent late catch-up alerts. The minute containing the evening cutoff is
+  included for the minute-based trigger.
+- Fixed reschedule history never initializing. First/new missions save a
+  baseline silently; small shifts accumulate against the last notified time.
+- Pet alerts use the same safe timestamp handling, respect quiet hours during
+  catch-up, and report the actual remaining minutes.
+- All four alerts safely ignore malformed/unavailable dates, completed or
+  in-flight missions, and past launches. Helper-based alerts wait for their
+  helper to be available. Action-level guards also apply to manual Run actions.
+- Added 25 offline blueprint regression tests to validation and release jobs,
+  including native variable conversion, midnight/DST, timing and deduplication.
+
+**Blueprint update required:** updating the card through HACS does not update
+blueprints already imported into Home Assistant. In Settings > Automations &
+scenes > Blueprints, use each Rocket Launch blueprint's three-dot menu >
+Re-import blueprint, then reload automations. Existing entity, notify and helper
+inputs remain compatible. Use a separate Text helper for each countdown, pet
+and reschedule automation. The daily check must be set before the launches you
+want to hear about; its default 8 AM check cannot warn before a 7:26 AM launch.
+Manual Run actions respects eligibility and may correctly send nothing.
+
 ## 0.3.1
 
 - Fixed completed launches remaining in the launch-details popup after the

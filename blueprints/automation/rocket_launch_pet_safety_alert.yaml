@@ -88,46 +88,42 @@ variables:
   dedup_helper: !input dedup_helper
   already_alerted: "{{ states(dedup_helper) }}"
   raw_state: "{{ states(next_launch_entity) }}"
-  has_value: "{{ raw_state not in ['unknown', 'unavailable', 'none', ''] }}"
-  launch_dt: "{{ as_local(as_datetime(raw_state)) if has_value else None }}"
-  # Same shape as the countdown-alert blueprint's `computed` block and for
-  # the same reason: flat `set` statements ending in one bare
-  # {{ dict(...) }} with no surrounding indentation, so this reliably comes
-  # back as a native value rather than risking a stringified fallback.
-  #
-  # "Before bedtime" is compared as pure time-of-day (minutes since
-  # midnight), not calendar dates - comparing full datetimes against
-  # today_at(cutoff_time) breaks for an early-morning launch (e.g. 1:30 AM),
-  # since "today" at evaluation time is the same calendar date as the
-  # launch, making a 1:15 AM alert look like it's "before" that same day's
-  # 8:30 PM cutoff even though it's actually the middle of the night before.
-  # Comparing minutes-of-day against an explicit [earliest_morning_time,
-  # cutoff_time) window sidesteps that entirely.
-  computed: |-
-    {% set alert_dt = (launch_dt - timedelta(minutes=minutes_before | int)) if has_value else None %}
-    {% set alert_minutes = (alert_dt.hour * 60 + alert_dt.minute) if alert_dt is not none else -1 %}
-    {% set cutoff_parts = cutoff_time.split(':') %}
-    {% set cutoff_minutes = (cutoff_parts[0] | int) * 60 + (cutoff_parts[1] | int) %}
-    {% set morning_parts = earliest_morning_time.split(':') %}
-    {% set morning_minutes = (morning_parts[0] | int) * 60 + (morning_parts[1] | int) %}
-    {% set within_bedtime = has_value and morning_minutes <= alert_minutes < cutoff_minutes %}
-    {% set key = (next_launch_entity ~ '|' ~ raw_state) if has_value else '' %}
-    {% set should_fire = has_value and launch_dt > now() and within_bedtime and now() >= alert_dt and key != already_alerted %}
-    {% set who = pet_names if pet_names else 'your pets' %}
-    {{ dict(fire=should_fire, key=key, who=who) }}
+  launch_ts: "{{ as_timestamp(raw_state, 0) }}"
+  eligible: >-
+    {% set abbrev = (state_attr(next_launch_entity, 'status_abbrev') or '') | lower | replace(' ', '') | replace('-', '') %}
+    {% set label = (state_attr(next_launch_entity, 'status') or '') | lower | replace(' ', '') | replace('-', '') %}
+    {{ launch_ts > 0 and abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] }}
+  computed: >-
+    {% set current = now() %}
+    {% set current_ts = as_timestamp(current) %}
+    {% set alert_ts = launch_ts - (minutes_before | int) * 60 %}
+    {% set alert_dt = as_local(as_datetime(alert_ts)) if eligible else none %}
+    {% set alert_seconds = alert_dt.hour * 3600 + alert_dt.minute * 60 + alert_dt.second if alert_dt is not none else -1 %}
+    {% set cutoff = today_at(cutoff_time) %}
+    {% set morning = today_at(earliest_morning_time) %}
+    {% set cutoff_seconds = cutoff.hour * 3600 + cutoff.minute * 60 + cutoff.second %}
+    {% set morning_seconds = morning.hour * 3600 + morning.minute * 60 + morning.second %}
+    {% set current_seconds = current.hour * 3600 + current.minute * 60 + current.second %}
+    {% set awake = morning_seconds <= alert_seconds < cutoff_seconds and morning_seconds <= current_seconds < cutoff_seconds %}
+    {% set key = next_launch_entity ~ '|' ~ raw_state %}
+    {% set ready = already_alerted not in ['unknown', 'unavailable'] %}
+    {% set fire = eligible and ready and awake and current_ts < launch_ts and current_ts >= alert_ts and key != already_alerted %}
+    {{ dict(fire=fire, key=key, who=(pet_names if pet_names else 'your pets'), minutes_left=(((launch_ts-current_ts)/60) | round(0, 'ceil') | int if fire else 0)) }}
 
 condition:
   - condition: template
     value_template: "{{ computed.fire }}"
 
 action:
+  - condition: template
+    value_template: "{{ computed.fire }}"
   - action: !input notify_service
     data:
       title: "🐾 Bring {{ computed.who }} inside"
       message: >-
         {{ state_attr(next_launch_entity, 'name') }} launches from
         {{ state_attr(next_launch_entity, 'pad_name') }} in about
-        {{ minutes_before }} minutes - the launch will be loud nearby.
+        {{ computed.minutes_left }} minutes - the launch will be loud nearby.
   - action: input_text.set_value
     target:
       entity_id: !input dedup_helper

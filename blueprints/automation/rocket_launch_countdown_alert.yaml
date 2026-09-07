@@ -36,10 +36,19 @@ blueprint:
     fallback_time:
       name: Latest alert time
       description: >
-        Never alert later than this clock time, even if that is less than the
-        usual lead time before launch (this is what covers an overnight
-        launch).
+        Move late-night alerts to this clock time on the relevant evening,
+        not today for a launch days away. Early-morning alerts move to the
+        previous evening. The minute containing this cutoff is included.
       default: "20:30:00"
+      selector:
+        time: {}
+    earliest_morning_time:
+      name: Earliest morning alert time
+      description: >
+        Alerts earlier than this are moved to the previous evening's latest
+        alert time. No catch-up notifications are sent while you are asleep.
+        Must be earlier than Latest alert time.
+      default: "06:00:00"
       selector:
         time: {}
     dedup_helper:
@@ -69,33 +78,43 @@ variables:
   next_launch_entity: !input next_launch_entity
   minutes_before: !input minutes_before
   fallback_time: !input fallback_time
+  earliest_morning_time: !input earliest_morning_time
   dedup_helper: !input dedup_helper
   already_alerted: "{{ states(dedup_helper) }}"
   raw_state: "{{ states(next_launch_entity) }}"
-  has_value: "{{ raw_state not in ['unknown', 'unavailable', 'none', ''] }}"
-  launch_dt: "{{ as_local(as_datetime(raw_state)) if has_value else None }}"
-  # Every branch collapses into flat `set` statements ending in one bare
-  # {{ dict(...) }} expression - no nested {% if %} wrapping that final
-  # expression - so the rendered template is a single native value with no
-  # stray indentation/whitespace around it. A dict template with leading
-  # whitespace (e.g. from an indented {{ }} inside an {% if %} block) can
-  # fail to come back as a real dict, which would break `computed.fire`
-  # below, so this shape is deliberate, not just a style choice.
-  computed: |-
-    {% set still_ahead = has_value and launch_dt > now() %}
-    {% set candidate_dt = (launch_dt - timedelta(minutes=minutes_before | int)) if still_ahead else None %}
-    {% set fallback_dt = today_at(fallback_time) %}
-    {% set alert_dt = ([candidate_dt, fallback_dt] | min) if candidate_dt is not none else None %}
-    {% set key = (next_launch_entity ~ '|' ~ raw_state) if still_ahead else '' %}
-    {% set should_fire = still_ahead and alert_dt is not none and now() >= alert_dt and key != already_alerted %}
-    {% set minutes_left = (((launch_dt - now()).total_seconds() / 60) | round(0, 'floor') | int) if should_fire else 0 %}
-    {{ dict(fire=should_fire, key=(key if should_fire else ''), minutes_left=minutes_left) }}
+  launch_ts: "{{ as_timestamp(raw_state, 0) }}"
+  eligible: >-
+    {% set abbrev = (state_attr(next_launch_entity, 'status_abbrev') or '') | lower | replace(' ', '') | replace('-', '') %}
+    {% set label = (state_attr(next_launch_entity, 'status') or '') | lower | replace(' ', '') | replace('-', '') %}
+    {{ launch_ts > 0 and abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] }}
+  computed: >-
+    {% set current = now() %}
+    {% set current_ts = as_timestamp(current) %}
+    {% set candidate_ts = launch_ts - (minutes_before | int) * 60 %}
+    {% set candidate = as_local(as_datetime(candidate_ts)) if eligible else none %}
+    {% set cutoff = today_at(fallback_time) %}
+    {% set morning = today_at(earliest_morning_time) %}
+    {% set cutoff_seconds = cutoff.hour * 3600 + cutoff.minute * 60 + cutoff.second %}
+    {% set morning_seconds = morning.hour * 3600 + morning.minute * 60 + morning.second %}
+    {% set current_seconds = current.hour * 3600 + current.minute * 60 + current.second %}
+    {% set candidate_seconds = candidate.hour * 3600 + candidate.minute * 60 + candidate.second if candidate is not none else 0 %}
+    {% set fallback = candidate.replace(hour=cutoff.hour, minute=cutoff.minute, second=cutoff.second, microsecond=0) if candidate is not none else none %}
+    {% set fallback = fallback - timedelta(days=1) if fallback is not none and candidate_seconds < morning_seconds else fallback %}
+    {% set alert_ts = [candidate_ts, as_timestamp(fallback)] | min if fallback is not none else 0 %}
+    {% set key = next_launch_entity ~ '|' ~ raw_state %}
+    {# Include the cutoff minute for the once-per-minute trigger, but never catch up overnight. #}
+    {% set awake = morning_seconds < cutoff_seconds and morning_seconds <= current_seconds < cutoff_seconds + 60 %}
+    {% set ready = already_alerted not in ['unknown', 'unavailable'] %}
+    {% set fire = eligible and ready and awake and current_ts < launch_ts and current_ts >= alert_ts and key != already_alerted %}
+    {{ dict(fire=fire, key=key, minutes_left=(((launch_ts-current_ts)/60) | round(0, 'ceil') | int if fire else 0)) }}
 
 condition:
   - condition: template
     value_template: "{{ computed.fire }}"
 
 action:
+  - condition: template
+    value_template: "{{ computed.fire }}"
   - action: !input notify_service
     data:
       title: "🚀 Launch countdown"
