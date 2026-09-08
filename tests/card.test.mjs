@@ -231,6 +231,27 @@ test("main card shows a near-term launch with a live countdown", () => {
   assert.match(html, /\d{2}:\d{2}:\d{2}/, "hero card should show a ticking countdown");
 });
 
+test("main card replaces an overdue hero timer with awaiting status", () => {
+  for (const statusAbbrev of ["Go", "Hold", "InFlight"]) {
+    const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({
+      statusAbbrev, net: new Date(Date.now() - 3600000).toISOString(),
+    })]) } };
+    const html = render(new Card(), { entity: ENTITY_ID }, hass);
+    assert.match(html, /class="hero/);
+    assert.match(html, /hero-countdown-text[^>]*>Awaiting updated status…/);
+    assert.doesNotMatch(html, /T\+\d/);
+  }
+});
+
+test("main card keeps the short post-target grace-period timer", () => {
+  const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({
+    net: new Date(Date.now() - 60000).toISOString(),
+  })]) } };
+  const html = render(new Card(), { entity: ENTITY_ID }, hass);
+  assert.match(html, /T\+\d/);
+  assert.doesNotMatch(html, /Awaiting updated status/);
+});
+
 test("main card shows a far-out launch as a compact row, not a hero", () => {
   const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
   const hass = { states: { [ENTITY_ID]: makeUpcomingState([makeRawLaunch({ net: farIso })]) } };
