@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.4
+
+- RL-002: unavailable or unknown sensors now show "Launch data unavailable"
+  on both cards and in the popup, ignoring retained launch attributes and
+  stopping their timers. Valid data restores normal behavior automatically.
+- RL-006: explicit approximate NET precision no longer drives a seconds-level
+  countdown, even when NET or window_start contains a timestamp. Minute/hour
+  precision shows an approximate time; broader precision shows its calendar
+  period. Calendar dates retain their UTC period instead of shifting into
+  the previous day or month in another timezone.
+- Second precision keeps the live timer. Older payloads without a precision
+  field retain their previous behavior; unrecognized explicit precision is
+  treated as approximate. Raw tracker sensors and blueprints are unchanged.
+- Added unavailable/recovery, approximate-date and real-popup regressions.
+  Existing RL-005 stale-hero behavior, violet styling and gestures are preserved.
+
 ## 0.3.3
 
 - Fixed RL-005: overdue launch heroes in the list and details popup now show

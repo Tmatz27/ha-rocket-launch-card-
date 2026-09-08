@@ -213,6 +213,64 @@ function render(card, config, hass) {
 
 const ENTITY_ID = "sensor.vandenberg_upcoming_launches";
 
+test("both cards stop unavailable/unknown retained data and recover", () => {
+  for (const Type of [Card, CountdownCard]) {
+    for (const state of ["unavailable", "unknown"]) {
+      const card = new Type();
+      const valid = makeUpcomingState([makeRawLaunch({net:new Date(Date.now()+3600000).toISOString()})]);
+      render(card, {entity:ENTITY_ID, show_when_inactive:false}, {states:{[ENTITY_ID]:valid}});
+      assert.match(card._root.innerHTML, /Starlink/);
+      card.hass = {states:{[ENTITY_ID]:{...valid,state}}};
+      assert.match(card._root.innerHTML, /Launch data unavailable/);
+      assert.doesNotMatch(card._root.innerHTML, /Starlink|Go for Launch|Data refreshed|\d{2}:\d{2}:\d{2}/);
+      assert.equal(card._tickTimer, null);
+      if (Type === CountdownCard) assert.equal(card.style.display, "");
+      card.hass = {states:{[ENTITY_ID]:valid}};
+      assert.match(card._root.innerHTML, /Starlink/);
+      assert.notEqual(card._tickTimer, null);
+    }
+  }
+});
+
+test("explicit approximate precision never creates an exact countdown or window fallback", () => {
+  const precisions = ["Minute", "Hour", "Morning", "Afternoon", "Day", "Week", "Month",
+    "Quarter 1", "Quarter 2", "Quarter 3", "Quarter 4", "Year Half 1", "Year Half 2",
+    "Year", "Fiscal Year", "Decade", "Unrecognized"];
+  for (const netPrecision of precisions) {
+    for (const Type of [Card, CountdownCard]) {
+      const card = new Type();
+      const html = render(card, {entity:ENTITY_ID}, {states:{[ENTITY_ID]:makeUpcomingState([
+        makeRawLaunch({netPrecision,net:new Date(Date.now()+3600000).toISOString(),
+          windowStart:new Date(Date.now()+1800000).toISOString()}),
+      ])}});
+      assert.doesNotMatch(html, /\d{2}:\d{2}:\d{2}|T- \d|Slipped from/);
+      assert.match(html, /precision|TBD/);
+    }
+  }
+});
+
+test("calendar-only precision keeps its UTC calendar period without timezone shifting", () => {
+  for (const Type of [Card, CountdownCard]) {
+    const html = render(new Type(), {entity:ENTITY_ID}, {states:{[ENTITY_ID]:makeUpcomingState([
+      makeRawLaunch({netPrecision:"Month",net:"2027-01-01T00:00:00Z"}),
+    ])}});
+    assert.match(html, /January 2027/);
+    assert.doesNotMatch(html, /December|00:00|T-/);
+  }
+});
+
+test("approximate Hold hero shows schedule text and exact precision resumes countdown", () => {
+  for (const Type of [Card, CountdownCard]) {
+    const card = new Type();
+    const launch = makeRawLaunch({netPrecision:"Day",statusAbbrev:"Hold",net:new Date(Date.now()+3600000).toISOString()});
+    const html = render(card, {entity:ENTITY_ID}, {states:{[ENTITY_ID]:makeUpcomingState([launch])}});
+    assert.match(html, /Day precision; time TBD/);
+    assert.doesNotMatch(html, /\d{2}:\d{2}:\d{2}/);
+    card.hass = {states:{[ENTITY_ID]:makeUpcomingState([{...launch, net_precision:"Second",status_abbrev:"Go"}])}};
+    assert.match(card._root.innerHTML, /\d{2}:\d{2}:\d{2}/);
+  }
+});
+
 // --- rocket-launch-card -------------------------------------------------
 
 test("main card shows a near-term launch with a live countdown", () => {
