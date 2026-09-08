@@ -383,3 +383,25 @@ browser harness serves local fixture data and exercises the actual card
 source; it does not connect to a real Home Assistant server. Its stub
 Home Assistant icons use placeholder glyphs. Screenshots go to
 `test-artifacts/` (or `BROWSER_ARTIFACT_DIR`).
+
+
+### Unavailable data and approximate dates (0.3.4)
+
+Both cards and the popup show **Launch data unavailable** when the sensor is
+unknown/unavailable. Retained attributes are not shown as live data, timers
+stop, and the next valid sensor update restores normal rendering.
+
+Only explicit **Second** precision produces a seconds-level countdown.
+Minute/Hour precision shows an approximate scheduled time; Morning, Afternoon,
+Day, Week, Month, Quarter, Year Half, Year, Fiscal Year and Decade show the
+appropriate calendar period. Unknown explicit precision does not produce an
+exact countdown. An approximate NET cannot use window_start as a workaround.
+Calendar-only periods retain the UTC date/month supplied by Launch Library.
+The compact countdown honors show_when_inactive for these approximate dates.
+
+For compatibility, older tracker payloads without a precision field keep the
+previous NET/window countdown behavior. This change affects card presentation;
+raw tracker timestamp sensors and blueprint notification logic are unchanged.
+No new blueprint import is needed if the 0.3.2 repairs are already installed.
+
+Precision definitions were checked against the [Launch Library 2.3.0 development API](https://lldev.thespacedevs.com/2.3.0/config/net_precisions/?limit=100&format=json).

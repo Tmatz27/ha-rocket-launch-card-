@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.3.3
+ * Version 0.3.4
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,7 +24,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.3.3";
+const ROCKET_LAUNCH_CARD_VERSION = "0.3.4";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
@@ -95,6 +95,10 @@ function parseIsoToEpochSeconds(iso) {
 // wire, not something this file controls the shape of.
 function normalizeLaunch(raw) {
   if (!raw || typeof raw !== "object") return null;
+  const precision = String(raw.net_precision || "").trim();
+  // Older tracker payloads omitted precision. Preserve that compatibility,
+  // but never promote an explicitly approximate NET/window to an exact T-0.
+  const exact = !precision || precision.toLowerCase() === "second";
   return {
     id: raw.id ?? null,
     name: raw.name || "Unknown launch",
@@ -106,14 +110,16 @@ function normalizeLaunch(raw) {
     rocket: raw.rocket || "",
     padName: raw.pad_name || "",
     locationName: raw.location_name || "",
-    netPrecision: raw.net_precision || "",
+    netPrecision: precision,
+    approximate: !exact,
+    scheduleTs: parseIsoToEpochSeconds(raw.net),
     orbit: raw.orbit || "",
     // Tri-state, not a plain bool: null means the tracker integration hasn't
     // sent this field at all (older version, or data not yet available),
     // which must not be shown as a confident "no landing attempt" claim.
     landingAttempt: raw.landing_attempt == null ? null : Boolean(raw.landing_attempt),
     landingLocation: raw.landing_location || "",
-    targetTs: parseIsoToEpochSeconds(raw.net) ?? parseIsoToEpochSeconds(raw.window_start),
+    targetTs: exact ? parseIsoToEpochSeconds(raw.net) ?? parseIsoToEpochSeconds(raw.window_start) : null,
     windowStartTs: parseIsoToEpochSeconds(raw.window_start),
     windowEndTs: parseIsoToEpochSeconds(raw.window_end),
     probability: Number.isFinite(raw.probability) ? raw.probability : null,
@@ -128,6 +134,9 @@ function readUpcomingEntity(hass, entityId) {
   if (!entityId) return { missingConfig: true, launches: [], lastUpdated: "" };
   const state = hass?.states?.[entityId];
   if (!state) return { missingEntity: true, launches: [], lastUpdated: "" };
+  if (["unavailable", "unknown"].includes(state.state)) {
+    return { unavailable: true, launches: [], lastUpdated: "" };
+  }
   const attrs = state.attributes || {};
   const launches = Array.isArray(attrs.launches) ? attrs.launches.map(normalizeLaunch).filter(Boolean) : [];
   return {
@@ -306,7 +315,29 @@ function rowDateTier(launch, now) {
 
 function rowClockText(launch) {
   if (launch.targetTs != null) return formatClock(launch.targetTs);
+  if (launch.approximate && launch.scheduleTs != null) return approximateDateText(launch);
   return launch.netPrecision ? `~${launch.netPrecision} precision` : "Date TBD";
+}
+
+function approximateDateText(launch) {
+  const precision = launch.netPrecision.toLowerCase();
+  const date = new Date(launch.scheduleTs * 1000);
+  // Day/month/year placeholders identify a calendar period, not an instant
+  // to shift into the viewer's timezone (which could change the day/month).
+  const year = date.getUTCFullYear();
+  const month = date.toLocaleDateString(undefined, { timeZone: "UTC", month: "long", year: "numeric" });
+  const day = date.toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
+  if (precision === "minute") return `Around ${formatClock(launch.scheduleTs)} (minute precision)`;
+  if (precision === "hour") return `Around ${new Date(date.setUTCMinutes(0, 0, 0)).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric" })} (hour precision)`;
+  if (["morning", "afternoon", "day"].includes(precision)) return `${day} — ${launch.netPrecision} precision; time TBD`;
+  if (precision === "week") return `Week of ${day}; time TBD`;
+  if (precision === "month") return `${month}; date TBD`;
+  if (/^quarter [1-4]$/.test(precision)) return `${launch.netPrecision}, ${year}; date TBD`;
+  if (/^year half [12]$/.test(precision)) return `${precision === "year half 1" ? "First" : "Second"} half of ${year}; date TBD`;
+  if (precision === "year") return `${year}; date TBD`;
+  if (precision === "fiscal year") return `Fiscal year ${year} (launch country); date TBD`;
+  if (precision === "decade") return `${Math.floor(year / 10) * 10}s; date TBD`;
+  return `${launch.netPrecision} precision; date/time TBD`;
 }
 
 // "T- 14 days" style relative countdown shown beneath the formatted date.
@@ -932,6 +963,12 @@ class RocketLaunchCard extends HTMLElement {
     }
   }
 
+  _stopTick() {
+    if (this._tickTimer != null) clearInterval(this._tickTimer);
+    this._tickTimer = null;
+    this._tickMs = null;
+  }
+
   _ensureTick(desiredMs) {
     if (!this._connected) return;
     if (this._tickMs === desiredMs && this._tickTimer) return;
@@ -950,7 +987,13 @@ class RocketLaunchCard extends HTMLElement {
     }
 
     const data = readUpcomingEntity(this._hass, this._config.entity);
+    if (data.unavailable) {
+      this._stopTick();
+      this._paint(`<ha-card><div class="card-content"><div class="rl-loading" role="status">Launch data unavailable — waiting for the sensor to recover.</div></div></ha-card>`);
+      return;
+    }
     if (data.missingConfig || data.missingEntity) {
+      this._stopTick();
       this._paint(`<ha-card>${starfieldHtml()}<div class="card-content">${this._header()}${noEntityHtml(data.missingConfig ? "missingConfig" : "missingEntity")}</div></ha-card>`);
       return;
     }
@@ -1006,7 +1049,7 @@ class RocketLaunchCard extends HTMLElement {
   _renderHero(launch, now, phase) {
     const delayInfo = trackDelay(launch);
     const seconds = launch.targetTs != null ? launch.targetTs - now / 1000 : 0;
-    const countdown = phase === "stale" ? "Awaiting updated status…" : launch.targetTs == null ? "— : — : —" : formatCountdown(seconds);
+    const countdown = phase === "stale" ? "Awaiting updated status…" : launch.targetTs == null ? rowClockText(launch) : formatCountdown(seconds);
     const tone = urgencyTone(launch, phase);
     const urgent = phase === "window" || launch.statusAbbrev === "inflight";
     const key = launchKey(launch);
@@ -1025,7 +1068,7 @@ class RocketLaunchCard extends HTMLElement {
           ${launch.provider ? `<span class="rl-badge neutral small"><ha-icon icon="mdi:domain"></ha-icon>${escapeHtml(launch.provider)}</span>` : ""}
           ${launch.rocket ? `<span class="hero-meta-text">${escapeHtml(launch.rocket)}</span>` : ""}
         </div>
-        <div class="hero-countdown ${phase === "stale" ? "hero-countdown-text" : ""}">${escapeHtml(countdown)}</div>
+        <div class="hero-countdown ${phase === "stale" || launch.targetTs == null ? "hero-countdown-text" : ""}">${escapeHtml(countdown)}</div>
         <div class="hero-detail">
           ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
           ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
@@ -1304,6 +1347,12 @@ class RocketLaunchCountdownCard extends HTMLElement {
     }
   }
 
+  _stopTick() {
+    if (this._tickTimer != null) clearInterval(this._tickTimer);
+    this._tickTimer = null;
+    this._tickMs = null;
+  }
+
   _ensureTick(desiredMs) {
     if (!this._connected) return;
     if (this._tickMs === desiredMs && this._tickTimer) return;
@@ -1322,7 +1371,13 @@ class RocketLaunchCountdownCard extends HTMLElement {
     }
 
     const data = readUpcomingEntity(this._hass, this._config.entity);
+    if (data.unavailable) {
+      this._stopTick();
+      this._paint(`<ha-card><div class="card-content"><div class="rl-loading" role="status">Launch data unavailable — waiting for the sensor to recover.</div></div></ha-card>`);
+      return;
+    }
     if (data.missingConfig || data.missingEntity) {
+      this._stopTick();
       this._paint(`<ha-card><div class="card-content">${noEntityHtml(data.missingConfig ? "missingConfig" : "missingEntity")}</div></ha-card>`, true);
       return;
     }
@@ -1361,7 +1416,7 @@ class RocketLaunchCountdownCard extends HTMLElement {
     const summary = next
       ? next.targetTs != null
         ? `Next ${escapeHtml(site)} launch in ${formatRelative(next.targetTs - now / 1000)} — countdown appears at T-${this._config.trigger_hours}h`
-        : `Next ${escapeHtml(site)} launch: ${escapeHtml(next.missionName)} (date TBD)`
+        : `Next ${escapeHtml(site)} launch: ${escapeHtml(next.missionName)} — ${escapeHtml(rowClockText(next))}`
       : `No ${escapeHtml(site)} launch currently tracked`;
     return `
       <ha-card>
@@ -1376,7 +1431,7 @@ class RocketLaunchCountdownCard extends HTMLElement {
   _activeHtml(launch, now, phase) {
     const delayInfo = trackDelay(launch);
     const seconds = launch.targetTs != null ? launch.targetTs - now / 1000 : 0;
-    const countdown = phase === "stale" ? "Awaiting updated status…" : launch.targetTs == null ? "Date TBD" : formatCountdown(seconds);
+    const countdown = phase === "stale" ? "Awaiting updated status…" : launch.targetTs == null ? rowClockText(launch) : formatCountdown(seconds);
     const tone = urgencyTone(launch, phase);
     const urgent = phase === "window" || launch.statusAbbrev === "inflight";
 
