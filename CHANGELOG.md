@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3
+
+- Fixed RL-005: overdue launch heroes in the list and details popup now show
+  "Awaiting updated status…" after the existing stale threshold, matching
+  the dedicated countdown card instead of counting up indefinitely.
+- Added regression coverage for stale Go, Hold and In Flight launches, while
+  preserving the short post-target grace-period timer.
+- Existing colors, accordion interactions, completed-launch filtering and
+  blueprints are unchanged. Update through HACS and refresh the dashboard.
+
 ## 0.3.2
 
 - Fixed blueprint variable-rendering errors: Home Assistant converts datetime

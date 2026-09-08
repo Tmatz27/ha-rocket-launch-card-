@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.3.2
+ * Version 0.3.3
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,7 +24,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.3.2";
+const ROCKET_LAUNCH_CARD_VERSION = "0.3.3";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
@@ -1006,7 +1006,7 @@ class RocketLaunchCard extends HTMLElement {
   _renderHero(launch, now, phase) {
     const delayInfo = trackDelay(launch);
     const seconds = launch.targetTs != null ? launch.targetTs - now / 1000 : 0;
-    const countdown = launch.targetTs == null ? "— : — : —" : formatCountdown(seconds);
+    const countdown = phase === "stale" ? "Awaiting updated status…" : launch.targetTs == null ? "— : — : —" : formatCountdown(seconds);
     const tone = urgencyTone(launch, phase);
     const urgent = phase === "window" || launch.statusAbbrev === "inflight";
     const key = launchKey(launch);
@@ -1025,7 +1025,7 @@ class RocketLaunchCard extends HTMLElement {
           ${launch.provider ? `<span class="rl-badge neutral small"><ha-icon icon="mdi:domain"></ha-icon>${escapeHtml(launch.provider)}</span>` : ""}
           ${launch.rocket ? `<span class="hero-meta-text">${escapeHtml(launch.rocket)}</span>` : ""}
         </div>
-        <div class="hero-countdown">${escapeHtml(countdown)}</div>
+        <div class="hero-countdown ${phase === "stale" ? "hero-countdown-text" : ""}">${escapeHtml(countdown)}</div>
         <div class="hero-detail">
           ${launch.padName ? `<span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(launch.padName)}</span>` : ""}
           ${launch.targetTs != null ? `<span><ha-icon icon="mdi:clock-outline"></ha-icon>${escapeHtml(formatClock(launch.targetTs))}</span>` : ""}
@@ -1127,6 +1127,12 @@ class RocketLaunchCard extends HTMLElement {
         font-weight: 700;
         letter-spacing: .02em;
         color: var(--rl-tone, var(--rl-accent));
+      }
+      .hero-countdown-text {
+        font-family: inherit;
+        font-size: 16px;
+        letter-spacing: normal;
+        color: var(--rl-muted);
       }
       .hero-detail {
         display: flex;
