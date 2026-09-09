@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.5
+
+- Restore the supplied date and the T-minus days/hours line for future
+  launches with approximate NET precision, including Minute, Day, Month
+  and Quarter schedules. Estimated relative times are clearly prefixed
+  "Est." and do not turn into a seconds-level countdown.
+- Broad-precision rows show the API-supplied calendar date with an estimate
+  and precision label. These dates may be placeholders, not confirmed
+  launch days. Calendar dates keep their UTC day instead of shifting to
+  the previous day in western timezones.
+- Once an estimated date passes, show "Awaiting updated date" instead of
+  counting up. Missing/invalid NET values do not invent a date or use the
+  launch window as a substitute.
+- Preserve unavailable-sensor handling, completed-launch filtering, stale
+  exact timers, popup actions and existing colors. Verified with 74 card
+  tests and 48 Chromium checks, including the mobile popup.
+
 ## 0.3.4
 
 - RL-002: unavailable or unknown sensors now show "Launch data unavailable"

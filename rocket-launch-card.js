@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.3.4
+ * Version 0.3.5
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,7 +24,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.3.4";
+const ROCKET_LAUNCH_CARD_VERSION = "0.3.5";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
@@ -305,8 +305,9 @@ function isProminent(launch, phase) {
 // date is replaced by the same live countdown the hero/countdown cards use.
 const DAY_MS = 24 * 60 * 60 * 1000;
 function rowDateTier(launch, now) {
-  if (launch.targetTs == null) return "normal";
-  const diffMs = launch.targetTs * 1000 - now;
+  const scheduled = launch.targetTs ?? launch.scheduleTs;
+  if (scheduled == null) return "normal";
+  const diffMs = scheduled * 1000 - now;
   if (diffMs <= DAY_MS) return "imminent";
   if (diffMs <= 7 * DAY_MS) return "soon";
   if (diffMs > 30 * DAY_MS) return "far";
@@ -317,6 +318,16 @@ function rowClockText(launch) {
   if (launch.targetTs != null) return formatClock(launch.targetTs);
   if (launch.approximate && launch.scheduleTs != null) return approximateDateText(launch);
   return launch.netPrecision ? `~${launch.netPrecision} precision` : "Date TBD";
+}
+
+// Keep the supplied date visible in the future-launch list. Broad precision
+// dates may be API placeholders, so label them as estimates, not confirmed days.
+function compactRowClockText(launch) {
+  if (!launch.approximate || launch.scheduleTs == null) return rowClockText(launch);
+  if (["minute", "hour"].includes(launch.netPrecision.toLowerCase())) return approximateDateText(launch);
+  const date = new Date(launch.scheduleTs * 1000).toLocaleDateString(undefined,
+    { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
+  return `Est. ${date} (${launch.netPrecision} precision)`;
 }
 
 function approximateDateText(launch) {
@@ -357,7 +368,11 @@ function formatTMinus(seconds) {
 }
 
 function rowCountdownText(launch, now, tier) {
-  if (launch.targetTs == null) return "";
+  if (launch.targetTs == null) {
+    if (!launch.approximate || launch.scheduleTs == null) return "";
+    const seconds = launch.scheduleTs - now / 1000;
+    return seconds > 0 ? `Est. ${formatTMinus(seconds)}` : "Awaiting updated date";
+  }
   const seconds = launch.targetTs - now / 1000;
   return tier === "imminent" ? formatCountdown(seconds) : formatTMinus(seconds);
 }
@@ -1084,7 +1099,7 @@ class RocketLaunchCard extends HTMLElement {
     const delayInfo = trackDelay(launch);
     const tone = urgencyTone(launch, phase);
     const tier = rowDateTier(launch, now);
-    const clockText = rowClockText(launch);
+    const clockText = compactRowClockText(launch);
     const countdownText = rowCountdownText(launch, now, tier);
     const key = launchKey(launch);
     const expanded = this._expandedKeys.has(key);

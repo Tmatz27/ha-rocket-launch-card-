@@ -385,19 +385,25 @@ Home Assistant icons use placeholder glyphs. Screenshots go to
 `test-artifacts/` (or `BROWSER_ARTIFACT_DIR`).
 
 
-### Unavailable data and approximate dates (0.3.4)
+### Unavailable data and approximate dates (0.3.5)
 
 Both cards and the popup show **Launch data unavailable** when the sensor is
 unknown/unavailable. Retained attributes are not shown as live data, timers
 stop, and the next valid sensor update restores normal rendering.
 
+Future-launch rows show the supplied date plus a relative countdown such as
+**Est. T- 22d 18h** for approximate NET values. Minute/Hour dates retain their
+approximate time. Broader schedules show an estimated calendar date with the
+precision label (for example, **Est. Sep 30, 2026 (Month precision)**).
+Month/quarter dates may be API placeholders; the estimate is a guide to how
+far away the supplied schedule is, not a confirmed launch day.
+
 Only explicit **Second** precision produces a seconds-level countdown.
-Minute/Hour precision shows an approximate scheduled time; Morning, Afternoon,
-Day, Week, Month, Quarter, Year Half, Year, Fiscal Year and Decade show the
-appropriate calendar period. Unknown explicit precision does not produce an
-exact countdown. An approximate NET cannot use window_start as a workaround.
-Calendar-only periods retain the UTC date/month supplied by Launch Library.
-The compact countdown honors show_when_inactive for these approximate dates.
+Approximate dates never fall back to window_start to create an exact timer.
+Calendar-only dates retain the UTC day/month supplied by Launch Library.
+An elapsed estimate shows **Awaiting updated date**, with no T+ counter.
+The front countdown card retains its approximate calendar-period text and
+honors show_when_inactive. Missing/invalid NET values remain date TBD.
 
 For compatibility, older tracker payloads without a precision field keep the
 previous NET/window countdown behavior. This change affects card presentation;
