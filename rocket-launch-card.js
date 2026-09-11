@@ -314,41 +314,29 @@ function rowDateTier(launch, now) {
   return "normal";
 }
 
+// Broad precision dates may be API placeholders, so label them as estimates,
+// not confirmed days. Every row style (hero, compact, countdown card) shares
+// this helper so a precision-formatting fix can't land in only one of them.
 function rowClockText(launch) {
   if (launch.targetTs != null) return formatClock(launch.targetTs);
-  if (launch.approximate && launch.scheduleTs != null) return approximateDateText(launch);
-  return launch.netPrecision ? `~${launch.netPrecision} precision` : "Date TBD";
-}
-
-// Keep the supplied date visible in the future-launch list. Broad precision
-// dates may be API placeholders, so label them as estimates, not confirmed days.
-function compactRowClockText(launch) {
-  if (!launch.approximate || launch.scheduleTs == null) return rowClockText(launch);
+  if (!launch.approximate || launch.scheduleTs == null) {
+    return launch.netPrecision ? `~${launch.netPrecision} precision` : "Date TBD";
+  }
   if (["minute", "hour"].includes(launch.netPrecision.toLowerCase())) return approximateDateText(launch);
   const date = new Date(launch.scheduleTs * 1000).toLocaleDateString(undefined,
     { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
   return `Est. ${date} (${launch.netPrecision} precision)`;
 }
 
+// rowClockText only calls this for minute/hour precision - those NETs are a
+// real instant with some slop, not a calendar placeholder, so they get a
+// specific time instead of the "Est. <date> (<precision>)" text every
+// coarser precision gets there.
 function approximateDateText(launch) {
   const precision = launch.netPrecision.toLowerCase();
-  const date = new Date(launch.scheduleTs * 1000);
-  // Day/month/year placeholders identify a calendar period, not an instant
-  // to shift into the viewer's timezone (which could change the day/month).
-  const year = date.getUTCFullYear();
-  const month = date.toLocaleDateString(undefined, { timeZone: "UTC", month: "long", year: "numeric" });
-  const day = date.toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
   if (precision === "minute") return `Around ${formatClock(launch.scheduleTs)} (minute precision)`;
-  if (precision === "hour") return `Around ${new Date(date.setUTCMinutes(0, 0, 0)).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric" })} (hour precision)`;
-  if (["morning", "afternoon", "day"].includes(precision)) return `${day} — ${launch.netPrecision} precision; time TBD`;
-  if (precision === "week") return `Week of ${day}; time TBD`;
-  if (precision === "month") return `${month}; date TBD`;
-  if (/^quarter [1-4]$/.test(precision)) return `${launch.netPrecision}, ${year}; date TBD`;
-  if (/^year half [12]$/.test(precision)) return `${precision === "year half 1" ? "First" : "Second"} half of ${year}; date TBD`;
-  if (precision === "year") return `${year}; date TBD`;
-  if (precision === "fiscal year") return `Fiscal year ${year} (launch country); date TBD`;
-  if (precision === "decade") return `${Math.floor(year / 10) * 10}s; date TBD`;
-  return `${launch.netPrecision} precision; date/time TBD`;
+  const hour = new Date(new Date(launch.scheduleTs * 1000).setUTCMinutes(0, 0, 0));
+  return `Around ${hour.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric" })} (hour precision)`;
 }
 
 // "T- 14 days" style relative countdown shown beneath the formatted date.
@@ -1054,7 +1042,7 @@ class RocketLaunchCard extends HTMLElement {
     const delayInfo = trackDelay(launch);
     const tone = urgencyTone(launch, phase);
     const tier = rowDateTier(launch, now);
-    const clockText = compactRowClockText(launch);
+    const clockText = rowClockText(launch);
     const countdownText = rowCountdownText(launch, now, tier);
     const key = launchKey(launch);
     const expanded = this._expandedKeys.has(key);

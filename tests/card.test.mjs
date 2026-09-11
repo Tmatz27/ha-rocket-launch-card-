@@ -255,7 +255,9 @@ test("calendar-only precision keeps its UTC calendar period without timezone shi
     const html = render(new Type(), {entity:ENTITY_ID}, {states:{[ENTITY_ID]:makeUpcomingState([
       makeRawLaunch({netPrecision:"Month",net:"2027-01-01T00:00:00Z"}),
     ])}});
-    assert.match(html, Type === Card ? /Est\. Jan 1, 2027 \(Month precision\)/ : /January 2027/);
+    // Hero, compact row, and countdown card all share one date formatter now,
+    // so both card types show the same estimate for the same launch.
+    assert.match(html, /Est\. Jan 1, 2027 \(Month precision\)/);
     assert.doesNotMatch(html, /December|Dec 31|00:00/);
   }
 });
@@ -287,7 +289,7 @@ test("approximate Hold hero shows schedule text and exact precision resumes coun
     const card = new Type();
     const launch = makeRawLaunch({netPrecision:"Day",statusAbbrev:"Hold",net:new Date(Date.now()+3600000).toISOString()});
     const html = render(card, {entity:ENTITY_ID}, {states:{[ENTITY_ID]:makeUpcomingState([launch])}});
-    assert.match(html, /Day precision; time TBD/);
+    assert.match(html, /Est\..*\(Day precision\)/);
     assert.doesNotMatch(html, /\d{2}:\d{2}:\d{2}/);
     card.hass = {states:{[ENTITY_ID]:makeUpcomingState([{...launch, net_precision:"Second",status_abbrev:"Go"}])}};
     assert.match(card._root.innerHTML, /\d{2}:\d{2}:\d{2}/);
