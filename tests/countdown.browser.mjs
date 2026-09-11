@@ -21,6 +21,10 @@ await page.locator('#countdown').screenshot({path:path.join(artifactDir,'countdo
 await root.click();
 check(await page.locator('dialog').evaluate(e=>e.open),'tap opens native modal');
 check(await page.locator('dialog rocket-launch-card .rl-row').count()===2,'popup contains full three-launch list');
+check(await page.locator('dialog .rl-stars, dialog .rl-star, dialog .rl-moon').count()===0,'upcoming card has no decorative dots or moon');
+check(await page.locator('dialog .hero-countdown').evaluate(e=>getComputedStyle(e).color)==='rgb(180, 154, 255)','upcoming hero matches the violet countdown');
+check(await page.locator('dialog .rl-row').first().evaluate(e=>getComputedStyle(e).borderLeftWidth)==='1px','upcoming rows use a thin border instead of a status stripe');
+check(await page.locator('dialog .rl-tier-soon').evaluate(e=>getComputedStyle(e).color)==='rgb(180, 154, 255)','upcoming T-minus uses violet');
 await page.locator('dialog .rl-row').first().click();
 check(await page.locator('dialog .rl-row').first().getAttribute('aria-expanded')==='true','popup accordion works');
 await page.evaluate(()=>{fixtureHass.states[baseConfig.entity].attributes.launches[0].mission_name='Updated live mission';card.hass=fixtureHass;});

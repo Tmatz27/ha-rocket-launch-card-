@@ -113,12 +113,12 @@ Both cards also have a visual editor — use **Add card → Rocket Launch Card**
 | `trigger_hours` | `2` | The countdown takes over this many hours before launch |
 | `show_when_inactive` | `true` | When outside the window, show a one-line "next launch in..." summary instead of collapsing to nothing |
 
-### Countdown appearance and actions (0.3.0)
+### Card appearance and countdown actions (0.3.6)
 
-The countdown uses violet (`#b49aff`) by default, with a subtle top accent
-instead of a green left stripe. The countdown has no decorative stars or
-moon. Hold/Failure warnings keep their red styling. The full launch-list
-card retains its existing status colors.
+Both cards use violet (`#b49aff`) by default, with a subtle top accent,
+light surface tint and thin neutral borders. The upcoming list and popup
+match the countdown card. Neither card has decorative dots, stars or a moon.
+Hold/Failure, imminent timing and RTLS warnings retain their red styling.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -200,18 +200,15 @@ Holds and overdue unconfirmed launches are kept visible.
   launch is close — see the tracker repo's README for exactly how that's
   paced against Launch Library's rate limit).
 - **Real status, not just timing**: a launch carries an actual status —
-  Go, TBD, Hold, Success, Failure, In Flight — shown as a pill badge, and
-  echoed in a 6px left accent bar on the main list's rows (green for Go/Success, red
-  for Hold/Failure, blue/gray for TBD or an ordinary scheduled launch). A
+  Go, TBD, Hold, Success, Failure, In Flight — shown as a pill badge.
+  Routine Go accents are violet; Hold/Failure badges remain red. A
   Hold or an In-Flight launch stays prominent regardless of the configured
   window. The launch provider gets its own neutral pill badge next to it.
-- **T-minus line, color-coded by proximity**: a compact row shows the
-  formatted date and, beneath it, a relative "T- 14 days" line (with the
-  hours remainder shown too once it's under 2 days, e.g. "T- 1d 18h", so it
-  never reads as "about a day" for something up to 47 hours out). That
-  second line is muted gray beyond 30 days out, warning yellow/orange
-  inside 7 days, and switches to a bold live countdown once inside 24
-  hours — even if that row isn't the hero card.
+- **T-minus line**: a compact row shows the supplied date and a relative
+  countdown beneath it, including days and the hours remainder. Future
+  T-minus lines use violet, softened beyond 30 days. Exact times inside
+  24 hours use the bold red live countdown; approximate schedules retain
+  their labeled estimates. See the precision notes below.
 - **Click a row for more detail**: any launch row (hero or compact) expands
   in place to show target orbit, rocket, booster landing status, and the
   mission description, without opening Home Assistant's more-info dialog.

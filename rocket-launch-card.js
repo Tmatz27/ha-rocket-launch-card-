@@ -1,6 +1,6 @@
 /**
  * Rocket Launch Card for Home Assistant
- * Version 0.3.5
+ * Version 0.3.6
  *
  * Two custom cards backed by Tmatz27/ha-rocket-launch-tracker, a small
  * custom integration that polls Launch Library 2 (thespacedevs.com),
@@ -24,7 +24,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-const ROCKET_LAUNCH_CARD_VERSION = "0.3.5";
+const ROCKET_LAUNCH_CARD_VERSION = "0.3.6";
 
 const DEFAULT_MAIN_CONFIG = Object.freeze({
   title: "Rocket Launches",
@@ -657,7 +657,7 @@ class RocketLaunchCountdownCardEditor extends RocketLaunchEditorBase {
   }
 }
 
-// --- Shared card chrome (empty states, styles, starfield) -------------------
+// --- Shared card chrome (empty states and styles) -------------------
 
 function noEntityHtml(kind) {
   return `
@@ -673,22 +673,6 @@ function noEntityHtml(kind) {
   `;
 }
 
-function starfieldHtml() {
-  // Purely decorative, kept cheap (a handful of fixed-position dots, no
-  // per-frame JS) and deliberately restrained - flat mdi icon, small dim
-  // dots - to sit quietly behind a flat dark theme instead of announcing
-  // itself the way a glowing gradient scene would.
-  return `
-    <div class="rl-stars" aria-hidden="true">
-      <span class="rl-star" style="top:10%;left:14%;--d:0s"></span>
-      <span class="rl-star" style="top:20%;left:80%;--d:.8s"></span>
-      <span class="rl-star" style="top:38%;left:92%;--d:1.6s"></span>
-      <span class="rl-star" style="top:14%;left:48%;--d:2.3s"></span>
-      <ha-icon class="rl-moon" icon="mdi:moon-waning-crescent"></ha-icon>
-    </div>
-  `;
-}
-
 function baseStyles() {
   return `
     :host {
@@ -697,7 +681,7 @@ function baseStyles() {
       --rl-text: var(--primary-text-color, #f2f2f3);
       --rl-muted: var(--secondary-text-color, rgba(235, 235, 240, .56));
       --rl-border: var(--divider-color, rgba(255, 255, 255, .09));
-      --rl-accent: #4f8ef0;
+      --rl-accent: #b49aff;
       --rl-warn: #e2a13c;
       --rl-hot: #e0574c;
       --rl-good: #5aab55;
@@ -713,35 +697,6 @@ function baseStyles() {
       border-radius: var(--ha-card-border-radius, 18px);
       background: var(--rl-surface);
       box-shadow: var(--ha-card-box-shadow, 0 6px 18px rgba(0, 0, 0, .3));
-    }
-    .rl-stars {
-      position: absolute;
-      inset: 0;
-      overflow: hidden;
-      pointer-events: none;
-      z-index: 0;
-    }
-    .rl-star {
-      position: absolute;
-      width: 2.5px;
-      height: 2.5px;
-      border-radius: 50%;
-      background: var(--rl-muted);
-      opacity: .35;
-      animation: rl-twinkle 4s ease-in-out infinite;
-      animation-delay: var(--d, 0s);
-    }
-    .rl-moon {
-      position: absolute;
-      top: 8%;
-      right: 7%;
-      --mdc-icon-size: 15px;
-      color: var(--rl-muted);
-      opacity: .5;
-    }
-    @keyframes rl-twinkle {
-      0%, 100% { opacity: .12; }
-      50% { opacity: .5; }
     }
     .card-content { position: relative; z-index: 1; padding: clamp(16px, 3vw, 24px); }
     .hero, .cd-wrap {
@@ -835,7 +790,7 @@ function baseStyles() {
 // Launch Library reports an actual Go/TBD/Hold/Success/Failure/In Flight
 // status, so there's no need to infer it from timing alone the way the old
 // harocketlaunchlive-backed version had to. Shared by the badge and by the
-// hero/countdown panel's accent bar + watermark color, so both always agree.
+// hero/countdown panel's urgency tone. Decorative accents stay violet.
 function urgencyTone(launch, phase) {
   const abbrev = launch.statusAbbrev;
   if (abbrev === "success") return "good";
@@ -1009,7 +964,7 @@ class RocketLaunchCard extends HTMLElement {
     }
     if (data.missingConfig || data.missingEntity) {
       this._stopTick();
-      this._paint(`<ha-card>${starfieldHtml()}<div class="card-content">${this._header()}${noEntityHtml(data.missingConfig ? "missingConfig" : "missingEntity")}</div></ha-card>`);
+      this._paint(`<ha-card><div class="card-content">${this._header()}${noEntityHtml(data.missingConfig ? "missingConfig" : "missingEntity")}</div></ha-card>`);
       return;
     }
 
@@ -1025,7 +980,7 @@ class RocketLaunchCard extends HTMLElement {
 
     this._paint(`
       <ha-card>
-        ${starfieldHtml()}
+        
         <div class="card-content">
           ${this._header(data.siteFilter)}
           <div class="rl-list">${body}</div>
@@ -1071,7 +1026,7 @@ class RocketLaunchCard extends HTMLElement {
     const expanded = this._expandedKeys.has(key);
 
     return `
-      <article class="hero ${urgent ? "imminent" : ""}" style="${toneStyleAttr(tone)}"
+      <article class="hero ${urgent ? "imminent" : ""}" style="${toneStyleAttr(tone === "good" ? "accent" : tone)}"
         data-launch-key="${escapeHtml(key)}" role="button" tabindex="0" aria-expanded="${expanded ? "true" : "false"}">
         <div class="hero-top">
           ${urgencyBadge(launch, phase)}
@@ -1105,7 +1060,7 @@ class RocketLaunchCard extends HTMLElement {
     const expanded = this._expandedKeys.has(key);
     return `
       <div class="rl-row-wrap">
-        <div class="rl-row ${expanded ? "expanded" : ""}" style="${toneStyleAttr(tone)}"
+        <div class="rl-row ${expanded ? "expanded" : ""}" style="${toneStyleAttr(tone === "good" ? "accent" : tone)}"
           data-launch-key="${escapeHtml(key)}" role="button" tabindex="0" aria-expanded="${expanded ? "true" : "false"}">
           <div class="rl-row-main">
             <span class="rl-row-name">${escapeHtml(launch.missionName)}</span>
@@ -1172,6 +1127,27 @@ class RocketLaunchCard extends HTMLElement {
         0%, 100% { box-shadow: 0 0 0 rgba(224, 87, 76, 0); }
         50% { box-shadow: 0 0 20px color-mix(in srgb, var(--rl-hot) 30%, transparent); }
       }
+      .hero, .rl-row {
+        position: relative;
+        overflow: hidden;
+        border-left-width: 1px;
+        border-left-color: var(--rl-border);
+        background: linear-gradient(155deg, color-mix(in srgb, var(--rl-accent) 7%, transparent), transparent 65%), var(--rl-surface-2);
+      }
+      .hero::before, .rl-row::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 14%;
+        right: 14%;
+        height: 2px;
+        pointer-events: none;
+        background: linear-gradient(90deg, transparent, var(--rl-accent), transparent);
+      }
+      .hero .rl-badge.good {
+        border-color: color-mix(in srgb, var(--rl-accent) 45%, transparent);
+        background: color-mix(in srgb, var(--rl-accent) 12%, transparent);
+      }
       .hero { cursor: pointer; }
       .hero:focus-visible { outline: 2px solid var(--rl-accent); outline-offset: 2px; }
       .hero-top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -1217,9 +1193,9 @@ class RocketLaunchCard extends HTMLElement {
         gap: 10px;
         padding: 10px 14px 10px 12px;
         border: 1px solid var(--rl-border);
-        border-left: 6px solid var(--rl-tone, var(--rl-accent));
+        border-left: 1px solid var(--rl-border);
         border-radius: 14px;
-        background: rgba(255, 255, 255, .03);
+        background: linear-gradient(155deg, color-mix(in srgb, var(--rl-accent) 7%, transparent), transparent 65%), var(--rl-surface-2);
         cursor: pointer;
       }
       .rl-row:focus-visible { outline: 2px solid var(--rl-accent); outline-offset: 2px; }
@@ -1236,9 +1212,9 @@ class RocketLaunchCard extends HTMLElement {
       .rl-row-date { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
       .rl-row-when { color: var(--rl-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
       .rl-row-countdown { font-size: 10.5px; font-weight: 700; white-space: nowrap; }
-      .rl-row-countdown.rl-tier-far { color: var(--rl-muted); }
-      .rl-row-countdown.rl-tier-normal { color: var(--rl-text); opacity: .85; }
-      .rl-row-countdown.rl-tier-soon { color: var(--rl-warn); font-weight: 700; }
+      .rl-row-countdown.rl-tier-far { color: color-mix(in srgb, var(--rl-accent) 65%, var(--rl-muted)); }
+      .rl-row-countdown.rl-tier-normal { color: var(--rl-accent); opacity: .85; }
+      .rl-row-countdown.rl-tier-soon { color: var(--rl-accent); font-weight: 700; }
       .rl-row-countdown.rl-tier-imminent {
         color: var(--rl-hot);
         font-weight: 800;
@@ -1266,7 +1242,7 @@ class RocketLaunchCard extends HTMLElement {
         border-top: 1px solid var(--rl-border);
       }
       .rl-row-expand-attached {
-        border-left: 6px solid transparent;
+        border-left: 1px solid transparent;
         border-right: 1px solid transparent;
         border-bottom: 1px solid transparent;
         border-radius: 0 0 14px 14px;
@@ -1274,8 +1250,8 @@ class RocketLaunchCard extends HTMLElement {
       .rl-row-expand-attached.open {
         margin-top: -1px;
         padding: 10px 14px 12px 18px;
-        background: rgba(255, 255, 255, .03);
-        border-left-color: var(--rl-tone, var(--rl-accent));
+        background: linear-gradient(155deg, color-mix(in srgb, var(--rl-accent) 7%, transparent), transparent 65%), var(--rl-surface-2);
+        border-left-color: var(--rl-border);
         border-right-color: var(--rl-border);
         border-bottom-color: var(--rl-border);
       }

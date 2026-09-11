@@ -450,7 +450,7 @@ test("Hold status renders with the hot (red) tone, not the old warning tone", ()
   assert.match(html, /rl-badge hot/);
 });
 
-test("Go status renders with the good (green) tone", () => {
+test("Go launch panels use the violet accent tone", () => {
   const farIso = new Date(Date.now() + 96 * 3600 * 1000).toISOString();
   const hass = {
     states: {
@@ -459,7 +459,7 @@ test("Go status renders with the good (green) tone", () => {
   };
   const html = render(new Card(), { entity: ENTITY_ID, live_window_hours: 24 }, hass);
 
-  assert.match(html, /--rl-tone: var\(--rl-good\)/);
+  assert.match(html, /--rl-tone: var\(--rl-accent\)/);
 });
 
 test("provider renders as a neutral pill badge, not plain text", () => {
