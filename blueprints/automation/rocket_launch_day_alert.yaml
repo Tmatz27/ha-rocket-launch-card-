@@ -6,7 +6,8 @@ blueprint:
     the ha-rocket-launch-tracker integration's "Next Launch" sensor, which
     is already filtered server-side to your configured site - unlike the
     earlier version of this blueprint, there's no site-matching to do here
-    at all.
+    at all. Skipped when today's date itself is only a rough placeholder
+    (net_precision of Week or coarser) rather than a confirmed target day.
   domain: automation
   source_url: https://github.com/Tmatz27/ha-rocket-launch-card-/blob/main/blueprints/automation/rocket_launch_day_alert.yaml
   input:
@@ -46,7 +47,9 @@ variables:
   eligible: >-
     {% set abbrev = (state_attr(next_launch_entity, 'status_abbrev') or '') | lower | replace(' ', '') | replace('-', '') %}
     {% set label = (state_attr(next_launch_entity, 'status') or '') | lower | replace(' ', '') | replace('-', '') %}
-    {{ launch_ts > 0 and abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] }}
+    {% set precision = (state_attr(next_launch_entity, 'net_precision') or '') | trim | lower %}
+    {% set day_known = precision in ['', 'second', 'minute', 'hour', 'morning', 'afternoon', 'day'] %}
+    {{ launch_ts > 0 and day_known and abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] }}
   computed: >-
     {% set launch_dt = as_local(as_datetime(launch_ts)) if eligible else none %}
     {% set current = now() %}

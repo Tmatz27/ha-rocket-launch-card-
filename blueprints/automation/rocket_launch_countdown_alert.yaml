@@ -5,7 +5,10 @@ blueprint:
     1 hour ahead, but never later than a fallback clock time (default 8:30
     PM) - so a launch overnight still warns you before bed instead of
     waking you with a 1-hour-out alert at 1 AM. Checks every minute, so it
-    can take up to a minute to fire after the threshold is crossed.
+    can take up to a minute to fire after the threshold is crossed. Skipped
+    while the target time is still a rough placeholder (net_precision
+    coarser than an exact second) rather than counting down to a date
+    Launch Library hasn't confirmed yet.
 
     Requires a one-time helper: create an Input Text helper (Settings >
     Devices & Services > Helpers > + Create Helper > Text) to remember which
@@ -86,7 +89,8 @@ variables:
   eligible: >-
     {% set abbrev = (state_attr(next_launch_entity, 'status_abbrev') or '') | lower | replace(' ', '') | replace('-', '') %}
     {% set label = (state_attr(next_launch_entity, 'status') or '') | lower | replace(' ', '') | replace('-', '') %}
-    {{ launch_ts > 0 and abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] }}
+    {% set precision = (state_attr(next_launch_entity, 'net_precision') or '') | trim | lower %}
+    {{ launch_ts > 0 and precision in ['', 'second'] and abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] }}
   computed: >-
     {% set current = now() %}
     {% set current_ts = as_timestamp(current) %}
