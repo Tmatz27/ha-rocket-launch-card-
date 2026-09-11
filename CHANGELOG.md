@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.6
+
+- Match the upcoming launch list and its popup to the countdown card's
+  violet theme (#b49aff), with a subtle violet surface tint and top accent.
+- Replace the thick green/gray left stripes with thin neutral borders.
+  Routine Go hero timers and upcoming T-minus lines now use violet;
+  Hold/Failure, imminent timing and RTLS warning styles stay red.
+- Remove decorative stars, dots and the moon from the upcoming card,
+  including empty states, and remove their unused animation styles.
+- Preserve launch dates, estimated days/hours, filtering, popup actions
+  and accordion behavior. No tracker or blueprint changes are required.
+
 ## 0.3.5
 
 - Restore the supplied date and the T-minus days/hours line for future
