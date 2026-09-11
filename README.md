@@ -404,7 +404,15 @@ honors show_when_inactive. Missing/invalid NET values remain date TBD.
 
 For compatibility, older tracker payloads without a precision field keep the
 previous NET/window countdown behavior. This change affects card presentation;
-raw tracker timestamp sensors and blueprint notification logic are unchanged.
-No new blueprint import is needed if the 0.3.2 repairs are already installed.
+raw tracker timestamp sensors were unchanged.
 
 Precision definitions were checked against the [Launch Library 2.3.0 development API](https://lldev.thespacedevs.com/2.3.0/config/net_precisions/?limit=100&format=json).
+
+Update: the four automation blueprints read that same raw, ungated timestamp
+sensor directly, so they were still exposed to exactly this - a launch whose
+net_precision is still coarse (e.g. Month) has its API placeholder date/time
+treated as real. All four now check net_precision before firing: the daily
+launch-day alert accepts anything Day-precision or finer, and the countdown,
+pet-safety, and reschedule alerts require exact (Second) precision, since a
+countdown needs a real time-of-day to count down to. Re-import a blueprint to
+pick this up if you already had it installed.

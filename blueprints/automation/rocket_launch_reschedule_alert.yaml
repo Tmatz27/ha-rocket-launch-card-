@@ -11,6 +11,11 @@ blueprint:
     now "next") is not a reschedule and stays silent - this only fires when
     the *same* tracked launch's time itself changes.
 
+    A placeholder time firming up to an exact one (net_precision reaching
+    Second as Launch Library nails down a firm target) is treated the same
+    way: silently seeded as a new baseline, not reported as a delay or
+    move-earlier.
+
     Requires a one-time helper: create an Input Text helper (Settings >
     Devices & Services > Helpers > + Create Helper > Text) to remember the
     last known launch + time, separate from any helper used by the
@@ -81,8 +86,9 @@ variables:
     {% set old_ts = as_timestamp(parts[1], 0) if parts | length == 2 else 0 %}
     {% set abbrev = (state_attr(next_launch_entity, 'status_abbrev') or '') | lower | replace(' ', '') | replace('-', '') %}
     {% set label = (state_attr(next_launch_entity, 'status') or '') | lower | replace(' ', '') | replace('-', '') %}
+    {% set precision = (state_attr(next_launch_entity, 'net_precision') or '') | trim | lower %}
     {% set pending = abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] %}
-    {% set valid = pending and new_ts > as_timestamp(now()) and new_id not in [none, '', 'unknown', 'unavailable'] and previous_raw not in ['unknown', 'unavailable'] %}
+    {% set valid = pending and precision in ['', 'second'] and new_ts > as_timestamp(now()) and new_id not in [none, '', 'unknown', 'unavailable'] and previous_raw not in ['unknown', 'unavailable'] %}
     {% set same_launch = valid and previous_id == new_id and old_ts > 0 %}
     {% set changed = same_launch and (new_ts-old_ts) | abs >= (min_change_minutes | int) * 60 %}
     {% set key = previous_raw if same_launch and not changed else (new_id ~ '|' ~ new_state if valid else previous_raw) %}

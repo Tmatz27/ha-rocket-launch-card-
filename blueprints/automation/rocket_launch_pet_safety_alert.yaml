@@ -7,7 +7,10 @@ blueprint:
     before your bedtime cutoff (default 8:30 PM). Unlike the countdown
     alert, a launch that would fall after the cutoff is skipped entirely
     rather than shifted earlier - if you're already in bed, the pets are
-    already in for the night and there's nothing to act on.
+    already in for the night and there's nothing to act on. Also skipped
+    while the target time is still a rough placeholder (net_precision
+    coarser than an exact second), since there's no real moment yet to
+    count down to.
   domain: automation
   source_url: https://github.com/Tmatz27/ha-rocket-launch-card-/blob/main/blueprints/automation/rocket_launch_pet_safety_alert.yaml
   input:
@@ -92,7 +95,8 @@ variables:
   eligible: >-
     {% set abbrev = (state_attr(next_launch_entity, 'status_abbrev') or '') | lower | replace(' ', '') | replace('-', '') %}
     {% set label = (state_attr(next_launch_entity, 'status') or '') | lower | replace(' ', '') | replace('-', '') %}
-    {{ launch_ts > 0 and abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] }}
+    {% set precision = (state_attr(next_launch_entity, 'net_precision') or '') | trim | lower %}
+    {{ launch_ts > 0 and precision in ['', 'second'] and abbrev not in ['success', 'failure', 'partialfailure', 'inflight'] and label not in ['success', 'launchsuccessful', 'launchsuccess', 'failure', 'launchfailure', 'launchfailed', 'partialfailure', 'launchpartialfailure', 'inflight'] }}
   computed: >-
     {% set current = now() %}
     {% set current_ts = as_timestamp(current) %}
