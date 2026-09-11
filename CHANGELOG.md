@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.7
+
+- Unified approximate-precision date text: the countdown card's dormant
+  summary and active-state fallback, and the main list's hero panel, now
+  show the same "Est. <date> (<precision>)" text the compact row already
+  restored in 0.3.5, instead of vaguer prose for the identical launch.
+- All four automation blueprints (launch day, countdown, pet safety,
+  reschedule) now check net_precision before treating the next-launch
+  sensor's timestamp as real, since that sensor has no precision gating of
+  its own. The daily launch-day alert accepts Day precision or finer; the
+  countdown, pet-safety and reschedule alerts require exact (Second)
+  precision, since they count down to a specific time-of-day. Previously a
+  launch at coarse precision (e.g. Month, routine for anything weeks out)
+  could produce a false "Launch today", a countdown to a fake time, or a
+  spurious reschedule notification when Launch Library merely refined its
+  estimate. Re-import a blueprint to pick this up if already installed.
+
 ## 0.3.6
 
 - Match the upcoming launch list and its popup to the countdown card's

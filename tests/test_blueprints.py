@@ -38,7 +38,8 @@ def local(value):
 
 class Harness:
     def __init__(self, name, now='2026-09-06T12:00:00', launch='2026-09-06T13:00:00',
-                 helper='', launch_id='launch-1', status='Go', label='Go for Launch', **inputs):
+                 helper='', launch_id='launch-1', status='Go', label='Go for Launch',
+                 precision=None, **inputs):
         self.blueprint = yaml.load((ROOT / f'blueprints/automation/rocket_launch_{name}_alert.yaml').read_text(encoding='utf-8'), Loader=Loader)
         self.inputs = {key: value['default'] for key, value in self.blueprint['blueprint']['input'].items() if 'default' in value}
         self.inputs.update(next_launch_entity=ENTITY, dedup_helper=HELPER, history_helper=HELPER, notify_service='notify.test')
@@ -52,7 +53,8 @@ class Harness:
             self.raw = launch
         self.states = {ENTITY: self.raw, HELPER: helper}
         self.attrs = {'launch_id': launch_id, 'status_abbrev': status, 'status': label,
-                      'name': 'Test mission', 'provider': 'SpaceX', 'pad_name': 'SLC-4E'}
+                      'name': 'Test mission', 'provider': 'SpaceX', 'pad_name': 'SLC-4E',
+                      'net_precision': precision}
         self.env = ImmutableSandboxedEnvironment(undefined=StrictUndefined)
         self.env.globals.update(now=lambda: self.now, timedelta=timedelta,
             states=lambda entity: self.states.get(entity, 'unknown'),
@@ -163,6 +165,22 @@ class BlueprintTests(unittest.TestCase):
         h = Harness('day', launch='2026-09-06T07:26:00'); h.run(manual=True)
         self.assertEqual(h.notifications, [])
 
+    def test_day_alert_accepts_day_precision_rejects_week_and_coarser(self):
+        # The day-alert only needs the calendar day to be real, unlike the
+        # time-of-day-based alerts, so Day/Morning/Afternoon still fire -
+        # only Week-or-coarser (where even the day is a placeholder) is skipped.
+        cases = [
+            (None, True), ('Second', True), ('Minute', True), ('Hour', True),
+            ('Morning', True), ('Afternoon', True), ('Day', True),
+            ('Week', False), ('Month', False), ('Quarter 2', False),
+            ('Year Half 1', False), ('Year', False), ('Fiscal Year', False),
+            ('Decade', False),
+        ]
+        for precision, expect_fire in cases:
+            with self.subTest(precision=precision):
+                h = Harness('day', precision=precision); h.run()
+                self.assertEqual(len(h.notifications), 1 if expect_fire else 0)
+
     def test_invalid_states_are_safe_and_silent(self):
         for name in ['day', 'countdown', 'pet_safety', 'reschedule']:
             for raw in ['unknown', 'unavailable', 'none', '', 'not-a-date', '2026-99-99']:
@@ -226,6 +244,17 @@ class BlueprintTests(unittest.TestCase):
             self.assertEqual(len(h.notifications), 1)
             self.assertEqual(h.context['computed']['minutes_left'], 360)
 
+    def test_countdown_skips_approximate_precision(self):
+        # A coarse net_precision means the sensor's timestamp is an API
+        # placeholder (e.g. midnight on the 1st for Month precision), not a
+        # real moment to count down to.
+        h = Harness('countdown', precision='Month'); h.run()
+        self.assertEqual(h.notifications, [])
+        h = Harness('countdown', precision='Second'); h.run()
+        self.assertEqual(len(h.notifications), 1)
+        h = Harness('countdown', precision=None); h.run()
+        self.assertEqual(len(h.notifications), 1)
+
     def test_pet_normal_threshold_and_real_remaining_minutes(self):
         h = Harness('pet_safety', now='2026-09-06T12:44:00'); h.run()
         self.assertEqual(h.notifications, [])
@@ -240,6 +269,12 @@ class BlueprintTests(unittest.TestCase):
         for now, launch in [('2026-09-07T01:45:00','2026-09-07T02:00:00'), ('2026-09-06T20:30:00','2026-09-06T20:45:00'), ('2026-09-06T20:31:00','2026-09-06T20:40:00')]:
             h = Harness('pet_safety', now=now, launch=launch); h.run(manual=True)
             self.assertEqual(h.notifications, [])
+
+    def test_pet_safety_skips_approximate_precision(self):
+        h = Harness('pet_safety', now='2026-09-06T12:50:00', precision='Day'); h.run()
+        self.assertEqual(h.notifications, [])
+        h = Harness('pet_safety', now='2026-09-06T12:50:00', precision=None); h.run()
+        self.assertEqual(len(h.notifications), 1)
 
     def test_past_launches_do_not_send_or_update_helpers(self):
         for name in ['countdown', 'pet_safety', 'reschedule']:
@@ -282,6 +317,25 @@ class BlueprintTests(unittest.TestCase):
             h = Harness('reschedule', helper=helper); h.run()
             self.assertEqual(h.notifications, [])
             self.assertEqual(h.writes, ['launch-1|'+h.raw])
+
+    def test_reschedule_skips_approximate_precision_and_seeds_once_exact(self):
+        # Coarse precision is never seeded into history at all, even manually.
+        h = Harness('reschedule', precision='Month'); h.run(manual=True)
+        self.assertEqual(h.notifications, [])
+        self.assertEqual(h.writes, [])
+        # Same launch, precision firms up to exact: since it was never
+        # seeded while coarse, this looks like (and is handled as) a
+        # first-time seed, not a spurious multi-week "delay".
+        h = Harness('reschedule', precision='Second', helper=''); h.run()
+        self.assertEqual(h.notifications, [])
+        self.assertEqual(h.writes, ['launch-1|'+h.raw])
+        # A launch that regresses from exact back to coarse (e.g. a scrub)
+        # stops being tracked rather than comparing against a baseline that
+        # no longer means anything.
+        baseline = 'launch-1|'+local('2026-09-06T13:00:00').isoformat()
+        h = Harness('reschedule', launch='2026-09-06T14:00:00', precision='Hour', helper=baseline); h.run()
+        self.assertEqual(h.notifications, [])
+        self.assertEqual(h.writes, [])
 
     def test_reschedule_missing_id_is_silent(self):
         h = Harness('reschedule', launch_id=None); h.run(manual=True)
