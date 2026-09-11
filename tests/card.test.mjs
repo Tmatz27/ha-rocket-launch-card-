@@ -243,7 +243,8 @@ test("explicit approximate precision never creates an exact countdown or window 
         makeRawLaunch({netPrecision,net:new Date(Date.now()+3600000).toISOString(),
           windowStart:new Date(Date.now()+1800000).toISOString()}),
       ])}});
-      assert.doesNotMatch(html, /\d{2}:\d{2}:\d{2}|T- \d|Slipped from/);
+      assert.doesNotMatch(html, /\d{2}:\d{2}:\d{2}|Slipped from/);
+      if (Type === Card) assert.match(html, /Est\. T- /);
       assert.match(html, /precision|TBD/);
     }
   }
@@ -254,8 +255,30 @@ test("calendar-only precision keeps its UTC calendar period without timezone shi
     const html = render(new Type(), {entity:ENTITY_ID}, {states:{[ENTITY_ID]:makeUpcomingState([
       makeRawLaunch({netPrecision:"Month",net:"2027-01-01T00:00:00Z"}),
     ])}});
-    assert.match(html, /January 2027/);
-    assert.doesNotMatch(html, /December|00:00|T-/);
+    assert.match(html, Type === Card ? /Est\. Jan 1, 2027 \(Month precision\)/ : /January 2027/);
+    assert.doesNotMatch(html, /December|Dec 31|00:00/);
+  }
+});
+
+test("future rows restore the supplied date and estimated days/hours for approximate schedules", () => {
+  const now = Date.parse("2026-09-08T00:00:00Z");
+  for (const netPrecision of ["Minute", "Hour", "Day", "Month", "Quarter 4"]) {
+    const launch = makeRawLaunch({netPrecision,net:"2026-09-30T18:00:00Z"});
+    const normalized = vm.runInNewContext(`normalizeLaunch(${JSON.stringify(launch)})`, sandbox);
+    const html = new Card()._renderCompactRow(normalized, now, "no-time");
+    assert.match(html, /Sep 30/);
+    assert.match(html, /Est\. T- 22d 18h/);
+    assert.doesNotMatch(html, /\d{2}:\d{2}:\d{2}/);
+  }
+});
+
+test("approximate rows never count up after their estimate or invent a date without NET", () => {
+  for (const net of ["2026-09-07T00:00:00Z", null, "invalid"]) {
+    const launch = makeRawLaunch({netPrecision:"Month",net,windowStart:"2026-10-01T00:00:00Z"});
+    const normalized = vm.runInNewContext(`normalizeLaunch(${JSON.stringify(launch)})`, sandbox);
+    const html = new Card()._renderCompactRow(normalized, Date.parse("2026-09-08T00:00:00Z"), "no-time");
+    assert.doesNotMatch(html, /T\+|Est\. T-|Oct 1/);
+    if (net === "2026-09-07T00:00:00Z") assert.match(html, /Awaiting updated date/);
   }
 });
 
